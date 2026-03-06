@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from faseroh.config import FASeROHConfig
 from faseroh.tokenizer import token_to_id, id_to_token, is_constant_token, build_vocabulary
 
 
@@ -25,7 +24,7 @@ def _get_const_ids(device: torch.device) -> set[int]:
     }
 
 
-def _compute_lambda(epoch: int, config: FASeROHConfig) -> float:
+def _compute_lambda(epoch: int, config) -> float:
     """Compute lambda_const for the current epoch (linear warmup).
 
     Parameters
@@ -51,7 +50,7 @@ def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
-    config: FASeROHConfig,
+    config,
     epoch: int,
 ) -> float:
     """Run one training epoch.
@@ -125,7 +124,7 @@ def train_one_epoch(
 
 @torch.no_grad()
 def evaluate(
-    model: nn.Module, loader: DataLoader, config: FASeROHConfig,
+    model: nn.Module, loader: DataLoader, config,
 ) -> float:
     """Compute average validation loss.
 
@@ -163,7 +162,7 @@ def evaluate(
 
 
 def _print_sample(
-    model: nn.Module, loader: DataLoader, config: FASeROHConfig,
+    model: nn.Module, loader: DataLoader, config,
 ) -> None:
     """Print one random validation prediction vs ground truth."""
     model.eval()
@@ -189,7 +188,7 @@ def train(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    config: FASeROHConfig,
+    config,
     eval_callback=None,
 ) -> None:
     """Full training loop with checkpointing.

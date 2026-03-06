@@ -19,7 +19,6 @@ from torch.utils.data import Dataset, DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from faseroh.dataset_generation import generate_dataset  # noqa: E402
-from faseroh.config import FASeROHConfig  # noqa: E402
 from faseroh.tokenizer import (  # noqa: E402
     token_to_id,
     tokens_to_ids,
@@ -37,7 +36,7 @@ class FASeROHDataset(Dataset):
     config : FASeROHConfig
     """
 
-    def __init__(self, records: list[dict], config: FASeROHConfig) -> None:
+    def __init__(self, records: list[dict], config) -> None:
         self.records = records
         self.config = config
         self.pad_id = token_to_id(config.pad_token)
@@ -131,7 +130,7 @@ def collate_fn(batch: list[dict]) -> dict:
     }
 
 
-def _cache_key(config: FASeROHConfig, split: str) -> str:
+def _cache_key(config, split: str) -> str:
     """Compute a short hash key for dataset caching."""
     sizes = {"train": config.n_train, "val": config.n_val, "test": config.n_test}
     raw = f"{config.seed}_{sizes[split]}_{split}_{config.allowed_base_functions}"
@@ -139,7 +138,7 @@ def _cache_key(config: FASeROHConfig, split: str) -> str:
 
 
 def _generate_split(
-    config: FASeROHConfig, n: int, split: str, seed_offset: int,
+    config, n: int, split: str, seed_offset: int,
 ) -> list[dict]:
     """Generate or load cached dataset split.
 
@@ -182,7 +181,7 @@ def _generate_split(
 
 
 def build_dataloaders(
-    config: FASeROHConfig,
+    config,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Generate train/val/test datasets and return their DataLoaders.
 

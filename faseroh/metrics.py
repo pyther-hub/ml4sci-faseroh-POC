@@ -17,7 +17,6 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from faseroh.config import FASeROHConfig  # noqa: E402
 from faseroh.inference import run_inference, _eval_expr_on_grid  # noqa: E402
 
 
@@ -119,7 +118,7 @@ def prefix_validity_accuracy(pred_tokens_list: list[list[str]]) -> float:
 def evaluate_predictions(
     model: torch.nn.Module,
     test_loader: DataLoader,
-    config: FASeROHConfig,
+    config,
     numpy_fns: list,
 ) -> dict:
     """Run inference on the test set and compute all metrics.

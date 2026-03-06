@@ -15,7 +15,6 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from faseroh.config import FASeROHConfig
 from faseroh.tokenizer import get_vocab_size, is_constant_token, build_vocabulary
 
 
@@ -64,7 +63,7 @@ class HistogramEncoder(nn.Module):
     config : FASeROHConfig
     """
 
-    def __init__(self, config: FASeROHConfig) -> None:
+    def __init__(self, config) -> None:
         super().__init__()
         d = config.d_model
         k = config.conv_kernel
@@ -133,7 +132,7 @@ class SymbolicDecoder(nn.Module):
     config : FASeROHConfig
     """
 
-    def __init__(self, config: FASeROHConfig) -> None:
+    def __init__(self, config) -> None:
         super().__init__()
         d = config.d_model
         V = get_vocab_size()
@@ -213,7 +212,7 @@ class FASeROH(nn.Module):
     config : FASeROHConfig
     """
 
-    def __init__(self, config: FASeROHConfig) -> None:
+    def __init__(self, config) -> None:
         super().__init__()
         self.encoder = HistogramEncoder(config)
         self.decoder = SymbolicDecoder(config)

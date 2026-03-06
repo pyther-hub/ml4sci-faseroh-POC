@@ -16,7 +16,6 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from faseroh.dataset_generation import prefix_to_infix, encode_constant  # noqa: E402
-from faseroh.config import FASeROHConfig  # noqa: E402
 from faseroh.tokenizer import (  # noqa: E402
     token_to_id,
     id_to_token,
@@ -90,7 +89,7 @@ def _eval_expr_on_grid(
 def sample_one(
     model: torch.nn.Module,
     memory: torch.Tensor,
-    config: FASeROHConfig,
+    config,
 ) -> dict:
     """Generate one candidate via top-K sampling.
 
@@ -171,7 +170,7 @@ def run_inference(
     model: torch.nn.Module,
     histogram_tensor: torch.Tensor,
     true_fn,
-    config: FASeROHConfig,
+    config,
     src_key_padding_mask: torch.Tensor | None = None,
 ) -> dict:
     """Run inference: generate candidates and pick the best by MSE.
