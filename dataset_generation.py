@@ -520,6 +520,81 @@ def generate_histogram(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Step 3b — goodness_of_fit  (Section 2.3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def goodness_of_fit(
+    numpy_fn, histogram: dict, n_free_params: int = 0, n_pts_per_bin: int = 20
+) -> dict:
+    """Compute chi-squared goodness-of-fit statistic for a histogram vs f(x).
+
+    X = sum_k (N_k - n_k)^2 / n_k   (bins with N_k >= 5 only)
+    ndf = K_valid - n_free_params
+    A good fit has X / ndf ≈ 1.
+
+    Uses a single vectorised numpy evaluation over a (K, n_pts_per_bin+1) grid
+    and np.trapz for integration — no per-bin quad calls.
+
+    Parameters
+    ----------
+    numpy_fn      : normalised callable f(x) over [0, 1]
+    histogram     : dict {bins, N, K} from generate_histogram
+    n_free_params : P, number of free parameters in the fitted function
+    n_pts_per_bin : points per bin for trapezoidal integration (default 20)
+
+    Returns
+    -------
+    dict:
+        X              – raw chi-squared sum
+        ndf            – degrees of freedom (K_valid - P)
+        X_per_ndf      – X / ndf  (≈ 1 for a good fit)
+        n_bins_used    – number of bins included (N_k >= 5)
+        n_bins_skipped – bins excluded (N_k < 5)
+    """
+    bins = histogram["bins"]
+    N    = histogram["N"]
+    K    = histogram["K"]
+
+    # Build a (K, m+1) grid of x values — one row per bin, no shared edges needed
+    m       = n_pts_per_bin
+    edges   = np.linspace(0.0, 1.0, K + 1)          # (K+1,)
+    t       = np.linspace(0.0, 1.0, m + 1)           # (m+1,) normalised positions
+    bin_w   = edges[1:] - edges[:-1]                  # (K,)  all equal = 1/K
+    x_grid  = edges[:-1, None] + t[None, :] * bin_w[:, None]  # (K, m+1)
+
+    # Single function evaluation over all K*(m+1) points
+    y_grid  = numpy_fn(x_grid.ravel()).reshape(K, m + 1)  # (K, m+1)
+
+    # Vectorised trapezoidal integration per bin
+    integrals = np.trapz(y_grid, dx=bin_w[0] / m, axis=1)  # (K,)
+    n_k = N * integrals                                      # (K,) expected counts
+
+    N_k  = bins.astype(float)
+    mask = (N_k >= 5) & (n_k > 0)
+
+    diff     = N_k[mask] - n_k[mask]
+    X        = float(np.sum(diff ** 2 / n_k[mask]))
+    n_used   = int(mask.sum())
+    ndf      = max(n_used - n_free_params, 1)
+
+    return {
+        "X":               X,
+        "ndf":             ndf,
+        "X_per_ndf":       X / ndf,
+        "n_bins_used":     n_used,
+        "n_bins_skipped":  K - n_used,
+    }
+
+
+def count_free_params(encoding: dict) -> int:
+    """Count the floating-point constants in an encoded expression (P for GoF)."""
+    return sum(
+        1 for tok in encoding["tokens"]
+        if tok.startswith("C") and tok != "C0"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Step 4 — infix_to_prefix  (preorder traversal)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -601,7 +676,6 @@ def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
         sp.sin:  "sin",
         sp.cos:  "cos",
         sp.tan:  "tan",
-        sp.sqrt: "sqrt",
         sp.Abs:  "abs",
     }
     for func_cls, tok in _FUNC_MAP.items():
@@ -631,6 +705,7 @@ def infix_to_prefix(sympy_expr) -> dict:
     Returns
     -------
     dict:
+    
         tokens        – list[str]
         raw_mantissas – list[float] (0.0 for non-constants)
     """
@@ -863,10 +938,17 @@ def generate_dataset(
         expr_str = prefix_to_infix(encoding["tokens"], encoding["mantissas"])
         t_enc = time.perf_counter() - t3
 
+        # ── Step E: goodness-of-fit (Section 2.3) ────────────────────────────
+        t4 = time.perf_counter()
+        P = count_free_params(encoding)
+        gof = goodness_of_fit(result["numpy_fn"], histogram, n_free_params=P)
+        t_gof = time.perf_counter() - t4
+
         dataset.append({
             "expr_str":  expr_str,
             "histogram": histogram,
             "encoding":  encoding,
+            "gof":       gof,
         })
 
         if verbose:
@@ -876,7 +958,8 @@ def generate_dataset(
                 f"generate: {t_gen*1e3:.1f} ms | "
                 f"validate: {t_val*1e3:.1f} ms | "
                 f"histogram: {t_hist*1e3:.1f} ms | "
-                f"encoding: {t_enc*1e3:.1f} ms"
+                f"encoding: {t_enc*1e3:.1f} ms | "
+                f"gof: X/ndf={gof['X_per_ndf']:.3f} ({t_gof*1e3:.1f} ms)"
             )
 
     t_total = time.perf_counter() - t_dataset_start
@@ -907,12 +990,18 @@ if __name__ == "__main__":
         k_max=60,
         allowed_factories=POC_FACTORIES,
     )
-    print("\n--- Expressions and token sequences ---")
+    print("\n--- Expressions, token sequences, and GoF ---")
     for i, rec in enumerate(samples, 1):
         toks = rec["encoding"]["tokens"]
         mant = rec["encoding"]["mantissas"]
         hist = rec["histogram"]
+        gof  = rec["gof"]
         print(f"  {i:>2}. expr     = {rec['expr_str']}")
         print(f"      tokens   = {toks}")
         print(f"      mantissas= {[round(m, 4) for m in mant]}")
-        print(f"      N={hist['N']}, K={hist['K']}, bins[:5]={hist['bins'][:5].tolist()}\n")
+        print(f"      N={hist['N']}, K={hist['K']}, bins[:5]={hist['bins'][:5].tolist()}")
+        print(
+            f"      GoF: X={gof['X']:.2f}, ndf={gof['ndf']}, "
+            f"X/ndf={gof['X_per_ndf']:.3f} "
+            f"(bins used={gof['n_bins_used']}, skipped={gof['n_bins_skipped']})\n"
+        )
