@@ -1,9 +1,11 @@
 """Evaluation metrics for the FASEROH POC.
 
-Three metrics:
+Four metrics:
 1. R² score — coefficient of determination on a dense x-grid
 2. Sentence accuracy — exact match of full token sequences
 3. Prefix validity accuracy — syntactic validity of predicted prefix sequences
+4. Function validity accuracy — fraction of predictions that evaluate numerically
+5. Goodness-of-fit (χ²/ndf) — for valid predictions against the true histogram
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from dataset_generation import goodness_of_fit, prefix_to_infix  # noqa: E402
 from inference import run_inference, _eval_expr_on_grid  # noqa: E402
 
 
@@ -115,11 +118,35 @@ def prefix_validity_accuracy(pred_tokens_list: list[list[str]]) -> float:
     return valid / len(pred_tokens_list)
 
 
+def _pred_fn_from_tokens(tokens: list[str], mantissas: list[float]):
+    """Build a numpy callable from predicted tokens+mantissas, or None on failure."""
+    try:
+        infix = prefix_to_infix(tokens, mantissas)
+    except Exception:
+        return None
+    if not infix:
+        return None
+    _ns = {
+        "exp": np.e, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt,
+        "log": np.log, "abs": np.abs, "pi": np.pi, "__builtins__": {},
+    }
+    def fn(x):
+        ns = dict(_ns)
+        ns["x"] = np.asarray(x, dtype=float)
+        result = eval(infix, ns)  # noqa: S307
+        result = np.asarray(result, dtype=float)
+        if result.ndim == 0:
+            result = np.full_like(ns["x"], float(result))
+        return result
+    return fn
+
+
 def evaluate_predictions(
     model: torch.nn.Module,
     test_loader: DataLoader,
     config,
     numpy_fns: list,
+    raw_records: list[dict] | None = None,
 ) -> dict:
     """Run inference on the test set and compute all metrics.
 
@@ -129,10 +156,13 @@ def evaluate_predictions(
     test_loader : DataLoader
     config : FASeROHConfig
     numpy_fns : list of callable  true numpy functions for R² computation
+    raw_records : list[dict] | None  raw dataset records for GoF computation
+                  (each record must have a 'histogram' key with {bins, N, K})
 
     Returns
     -------
-    dict with keys: r2_mean, r2_median, sentence_acc, prefix_validity_acc
+    dict with keys: r2_mean, r2_median, sentence_acc, prefix_validity_acc,
+                    fn_validity_acc, gof_mean, gof_median
     """
     from tokenizer import id_to_token, token_to_id  # noqa
 
@@ -140,6 +170,8 @@ def evaluate_predictions(
     all_r2 = []
     all_pred_tokens = []
     all_true_tokens = []
+    all_gof = []
+    fn_valid_count = 0
     fn_idx = 0
     pad_id = token_to_id(config.pad_token)
     skip_ids = {token_to_id("<sos>"), token_to_id("<eos>"), pad_id}
@@ -153,6 +185,7 @@ def evaluate_predictions(
                 break
 
             true_fn = numpy_fns[fn_idx]
+            rec_idx = fn_idx
             fn_idx += 1
 
             # Get true tokens
@@ -171,33 +204,57 @@ def evaluate_predictions(
             best = result["best"]
             all_pred_tokens.append(best["tokens"])
 
-            # R² score
+            # Function validity + R² score
             y_pred = _eval_expr_on_grid(best["tokens"], best["mantissas"], n_points=200)
-            if y_pred is not None:
+            fn_valid = y_pred is not None
+            fn_valid_count += int(fn_valid)
+
+            if fn_valid:
                 y_true = true_fn(x_grid)
                 all_r2.append(r2_score(y_true, y_pred))
             else:
                 all_r2.append(float("-inf"))
 
+            # Goodness-of-fit against the true histogram
+            if fn_valid and raw_records is not None and rec_idx < len(raw_records):
+                raw_hist = raw_records[rec_idx]["histogram"]
+                pred_fn = _pred_fn_from_tokens(best["tokens"], best["mantissas"])
+                if pred_fn is not None:
+                    try:
+                        gof = goodness_of_fit(pred_fn, raw_hist)
+                        all_gof.append(gof["X_per_ndf"])
+                    except Exception:
+                        pass
+
+    n_total = len(all_r2)
     r2_finite = [r for r in all_r2 if r > float("-inf")]
     r2_arr = np.array(r2_finite) if r2_finite else np.array([0.0])
+    gof_arr = np.array(all_gof) if all_gof else np.array([float("nan")])
 
     metrics = {
         "r2_mean": float(np.mean(r2_arr)),
         "r2_median": float(np.median(r2_arr)),
         "sentence_acc": sentence_accuracy(all_pred_tokens, all_true_tokens),
         "prefix_validity_acc": prefix_validity_accuracy(all_pred_tokens),
+        "fn_validity_acc": fn_valid_count / n_total if n_total > 0 else 0.0,
+        "gof_mean": float(np.nanmean(gof_arr)),
+        "gof_median": float(np.nanmedian(gof_arr)),
     }
 
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 55)
     print("EVALUATION RESULTS")
-    print("=" * 50)
-    print(f"  R² mean   : {metrics['r2_mean']:.4f}")
-    print(f"  R² median : {metrics['r2_median']:.4f}")
+    print("=" * 55)
+    print(f"  Samples evaluated     : {n_total}")
+    print(f"  R² mean               : {metrics['r2_mean']:.4f}")
+    print(f"  R² median             : {metrics['r2_median']:.4f}  (valid: {len(r2_finite)}/{n_total})")
     print(f"  Sentence accuracy     : {metrics['sentence_acc']:.4f}")
     print(f"  Prefix validity acc   : {metrics['prefix_validity_acc']:.4f}")
-    print(f"  Samples evaluated     : {len(all_r2)}")
-    print(f"  Valid R² scores       : {len(r2_finite)}/{len(all_r2)}")
-    print("=" * 50)
+    print(f"  Function validity acc : {metrics['fn_validity_acc']:.4f}  ({fn_valid_count}/{n_total} evaluable)")
+    if all_gof:
+        print(f"  GoF chi2/ndf mean     : {metrics['gof_mean']:.4f}  (≈1 is good fit)")
+        print(f"  GoF chi2/ndf median   : {metrics['gof_median']:.4f}  ({len(all_gof)}/{fn_valid_count} valid fns)")
+    else:
+        print("  GoF chi2/ndf          : N/A (no raw_records or no valid predictions)")
+    print("=" * 55)
 
     return metrics

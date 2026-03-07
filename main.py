@@ -147,7 +147,7 @@ def _build_dataloaders(
 
 def _numpy_fn_from_expr_str(expr_str: str):
     _safe_ns: dict = {
-        "sin": np.sin, "cos": np.cos, "exp": np.exp,
+        "sin": np.sin, "cos": np.cos, "exp": np.e,
         "sqrt": np.sqrt, "log": np.log, "abs": np.abs,
         "pi": np.pi, "__builtins__": {},
     }
@@ -215,7 +215,7 @@ for epoch in range(config.n_epochs):
         print(f"\n[Epoch {epoch + 1}] Running evaluation ...")
         state = torch.load(config.checkpoint_path, weights_only=True)
         model.load_state_dict(state)
-        evaluate_predictions(model, test_loader, config, numpy_fns)
+        evaluate_predictions(model, test_loader, config, numpy_fns, test_recs)
 
 print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
 
@@ -227,7 +227,7 @@ print("  Final evaluation — best checkpoint")
 print("=" * 55)
 state = torch.load(config.checkpoint_path, weights_only=True)
 model.load_state_dict(state)
-final_metrics = evaluate_predictions(model, test_loader, config, numpy_fns)
+final_metrics = evaluate_predictions(model, test_loader, config, numpy_fns, test_recs)
 print(f"\nFinal metrics: {final_metrics}")
 
 

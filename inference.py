@@ -195,7 +195,15 @@ def run_inference(
     memory = model.encode(hist, mask)
 
     x_grid = np.linspace(1e-6, 1 - 1e-6, 100)
-    y_true = true_fn(x_grid)
+    try:
+        y_true = true_fn(x_grid)
+    except TypeError as e:
+        print(f"[run_inference] TypeError evaluating true_fn: {e}")
+        print(f"  true_fn = {true_fn}")
+        return {
+            "best": {"tokens": [], "mantissas": [], "expr_str": "(true_fn error)", "mse": float("inf"), "y_pred": None},
+            "all_candidates": [],
+        }
 
     candidates = []
     for _ in range(config.n_inference_samples):
