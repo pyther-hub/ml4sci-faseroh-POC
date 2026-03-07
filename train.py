@@ -6,9 +6,6 @@ Lambda warms up from 0 over the first lambda_warmup_epochs.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -184,52 +181,3 @@ def _print_sample(
     print(f"    Expr : {batch['expr_str'][0]}")
 
 
-def train(
-    model: nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    config,
-    eval_callback=None,
-) -> None:
-    """Full training loop with checkpointing.
-
-    Parameters
-    ----------
-    model : nn.Module
-    train_loader : DataLoader
-    val_loader : DataLoader
-    config : FASeROHConfig
-    eval_callback : callable(epoch: int) | None
-        If provided, called every config.evaluate_after epochs with the
-        current (1-indexed) epoch number.
-    """
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    best_val_loss = float("inf")
-
-    ckpt_dir = Path(config.checkpoint_path).parent
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-    for epoch in range(config.n_epochs):
-        print(f"\n{'='*60}")
-        print(f"Epoch {epoch + 1}/{config.n_epochs}")
-        print(f"{'='*60}")
-
-        train_loss = train_one_epoch(model, train_loader, optimizer, config, epoch)
-        val_loss = evaluate(model, val_loader, config)
-
-        saved = ""
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), config.checkpoint_path)
-            saved = " [saved]"
-
-        print(
-            f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-            f"best_val={best_val_loss:.4f}{saved}"
-        )
-        _print_sample(model, val_loader, config)
-
-        if eval_callback is not None and (epoch + 1) % config.evaluate_after == 0:
-            eval_callback(epoch + 1)
-
-    print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
