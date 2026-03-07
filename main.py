@@ -36,6 +36,7 @@ from  train import train_one_epoch, evaluate, _print_sample  # noqa: E402
 # ── 2. Configuration ──────────────────────────────────────────────────────────
 
 DATASET_JSON_PATH: str = "data/dataset_demo_1k.json"
+OPTIMISE_FOR_FLOAT: bool = False  # If True, adds MSE mantissa loss with lambda warmup alongside CE
 
 
 @dataclass
@@ -193,7 +194,10 @@ for epoch in range(config.n_epochs):
     print(f"Epoch {epoch + 1}/{config.n_epochs}")
     print(f"{'='*60}")
 
-    train_loss = train_one_epoch(model, train_loader, optimizer, config, epoch)
+    train_loss, train_sent_acc = train_one_epoch(
+        model, train_loader, optimizer, config, epoch,
+        optimise_for_float=OPTIMISE_FOR_FLOAT,
+    )
     val_loss, val_sent_acc, val_tok_acc = evaluate(model, val_loader, config)
 
     saved = ""
@@ -203,9 +207,9 @@ for epoch in range(config.n_epochs):
         saved = " [saved]"
 
     print(
-        f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-        f"val_sent_acc={val_sent_acc:.4f}  val_tok_acc={val_tok_acc:.4f}  "
-        f"best_val={best_val_loss:.4f}{saved}"
+        f"  train_loss={train_loss:.4f}  train_sent_acc={train_sent_acc:.4f}  "
+        f"val_loss={val_loss:.4f}  val_sent_acc={val_sent_acc:.4f}  "
+        f"val_tok_acc={val_tok_acc:.4f}  best_val={best_val_loss:.4f}{saved}"
     )
     # _print_sample(model, val_loader, config)
 
