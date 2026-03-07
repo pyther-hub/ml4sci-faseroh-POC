@@ -96,7 +96,7 @@ def _pred_fn_from_tokens(tokens: list[str], mantissas: list[float]):
     if not infix:
         return None
     _ns = {
-        "exp": np.e, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt,
+        "e": np.e, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt,
         "log": np.log, "abs": np.abs, "pi": np.pi, "__builtins__": {},
     }
     def fn(x):

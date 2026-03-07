@@ -608,7 +608,7 @@ def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
         return
 
     if expr is sp.E:
-        tokens.append("exp")
+        tokens.append("e")
         mantissas.append(0.0)
         return
 
@@ -661,11 +661,11 @@ def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
             _collect_prefix(expr.exp, tokens, mantissas)
         return
 
-    # ── exp(arg) → pow exp arg  (exp is the Euler constant, a leaf token) ────
+    # ── exp(arg) → pow e arg  (e is the Euler constant, a leaf token) ────
     if isinstance(expr, sp.exp):
         tokens.append("pow")
         mantissas.append(0.0)
-        tokens.append("exp")
+        tokens.append("e")
         mantissas.append(0.0)
         _collect_prefix(expr.args[0], tokens, mantissas)
         return
@@ -675,8 +675,6 @@ def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
         sp.log:  "log",
         sp.sin:  "sin",
         sp.cos:  "cos",
-        sp.tan:  "tan",
-        sp.Abs:  "abs",
     }
     for func_cls, tok in _FUNC_MAP.items():
         if isinstance(expr, func_cls):
@@ -727,8 +725,6 @@ _ARITY = {
     "log":  1,
     "sin":  1,
     "cos":  1,
-    "tan":  1,
-    "abs":  1,
     "?":    0,
 }
 
@@ -816,7 +812,7 @@ def encode_constants(tokens: list, raw_mantissas: list) -> dict:
         if tok.startswith("NUM(") or (
             tok not in _ARITY
             and tok != "x"
-            and tok not in ("pi", "exp")
+            and tok not in ("pi", "e")
             and tok not in [str(i) for i in range(-5, 6)]
         ):
             tok_enc, cm = encode_constant(raw)
@@ -935,6 +931,17 @@ def generate_dataset(
             if result["sympy_expr"] is not None
             else {"tokens": [], "mantissas": []}
         )
+
+        # Validate prefix structure after encoding; skip invalid records
+        from tokenizer import is_valid_prefix as _is_valid_prefix
+        if not _is_valid_prefix(encoding["tokens"]):
+            if verbose:
+                print(
+                    f"  attempt {attempts:>5} | encode: invalid prefix "
+                    f"(tokens={encoding['tokens'][:10]}...)"
+                )
+            continue
+
         expr_str = prefix_to_infix(encoding["tokens"], encoding["mantissas"])
         t_enc = time.perf_counter() - t3
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 _SPECIAL = ["<pad>", "<sos>", "<eos>", "<unk>"]
 _OPERATORS = ["+", "mul", "pow", "sqrt", "log", "sin", "cos"]
 _VARIABLE = ["x"]
-_MATH_CONSTANTS = ["pi", "exp"]  # π and Euler's number as single tokens
+_MATH_CONSTANTS = ["pi", "e"]  # π and Euler's number as single tokens
 _SMALL_INTS = [str(i) for i in range(-5, 6)]
 _CONST_TOKENS = [f"C{ce}" for ce in range(-4, 5)]
 
@@ -35,8 +35,6 @@ _ARITY: dict[str, int] = {
     "log":  1,
     "sin":  1,
     "cos":  1,
-    "tan":  1,
-    "abs":  1,
 }
 
 
@@ -190,5 +188,5 @@ def is_valid_prefix(tokens: list[str]) -> bool:
         arity = _ARITY.get(tok, None)
         if arity is not None:
             counter += arity
-        # leaf tokens (x, ints, C-tokens, pi, exp) contribute 0 children
+        # leaf tokens (x, ints, C-tokens, pi, e) contribute 0 children
     return counter == 0

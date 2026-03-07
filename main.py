@@ -35,8 +35,16 @@ from  train import train_one_epoch, evaluate, _print_sample  # noqa: E402
 
 # ── 2. Configuration ──────────────────────────────────────────────────────────
 
-DATASET_JSON_PATH: str = "data/dataset_demo_1k.json"
-OPTIMISE_FOR_FLOAT: bool = False  # If True, adds MSE mantissa loss with lambda warmup alongside CE
+import os
+
+if 'KAGGLE_KERNEL_RUN_TYPE' in os.environ:
+    DATASET_JSON_PATH: str = "/kaggle/input/datasets/tensorpanda231/faseroh-datasets/dataset_demo_10k.json"
+    print("Running in a Kaggle notebook environment.")
+else:
+    DATASET_JSON_PATH: str = "data/dataset_demo_10k.json"
+    print("Not running in a Kaggle notebook environment.")
+    
+OPTIMISE_FOR_FLOAT: bool = True  # If True, adds MSE mantissa loss with lambda warmup alongside CE
 
 
 @dataclass
@@ -47,24 +55,24 @@ class FASeROHConfig:
     test_frac: float = 0.1
 
     # Vocabulary
-    max_seq_len: int = 30
+    max_seq_len: int = 128
     pad_token: str = "<pad>"
     sos_token: str = "<sos>"
     eos_token: str = "<eos>"
 
     # Model architecture
-    d_model: int = 128
-    n_heads: int = 4
-    n_enc_layers: int = 3
-    n_dec_layers: int = 3
-    n_latent: int = 16
+    d_model: int = 256
+    n_heads: int = 8
+    n_enc_layers: int = 4
+    n_dec_layers: int = 6
+    n_latent: int = 32
     conv_kernel: int = 3
     dropout: float = 0.1
 
     # Training
-    batch_size: int = 64
+    batch_size: int = 32
     lr: float = 1e-4
-    n_epochs: int = 30
+    n_epochs: int = 50
     evaluate_after: int = 1
     lambda_const: float = 0.1
     lambda_warmup_epochs: int = 5
@@ -76,6 +84,9 @@ class FASeROHConfig:
     # Inference
     top_k: int = 5
     n_inference_samples: int = 50
+    refine_constants: bool = True
+    n_refine_candidates: int = 5
+    refine_max_iter: int = 100
 
 
 config = FASeROHConfig()
@@ -95,6 +106,14 @@ def _load_json_records(path: str) -> list[dict]:
         raw = json.load(f)
     records = []
     for rec in raw:
+        tokens = rec.get("encoding", {}).get("tokens", [])
+        # Skip records with removed tokens
+        if "tan" in tokens or "abs" in tokens:
+            continue
+        # Migrate exp → e for Euler's constant
+        rec["encoding"]["tokens"] = ["e" if t == "exp" else t for t in tokens]
+        if "expr_str" in rec:
+            rec["expr_str"] = rec["expr_str"].replace("exp", "e")
         hist = rec["histogram"]
         hist["bins"] = np.array(hist["bins"], dtype=int)
         rec["histogram"] = hist
@@ -145,7 +164,7 @@ def _build_dataloaders(
 
 def _numpy_fn_from_expr_str(expr_str: str):
     _safe_ns: dict = {
-        "sin": np.sin, "cos": np.cos, "exp": np.e,
+        "sin": np.sin, "cos": np.cos, "e": np.e,
         "sqrt": np.sqrt, "log": np.log, "abs": np.abs,
         "pi": np.pi, "__builtins__": {},
     }

@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.optimize import minimize
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -86,7 +87,7 @@ def _eval_expr_on_grid(
     x_grid = np.linspace(1e-6, 1 - 1e-6, n_points)
     try:
         safe_ns = {
-            "x": x_grid, "exp": np.e, "sin": np.sin, "cos": np.cos,
+            "x": x_grid, "e": np.e, "sin": np.sin, "cos": np.cos,
             "sqrt": np.sqrt, "log": np.log, "abs": np.abs, "pi": np.pi,
             "__builtins__": {},
         }
@@ -205,6 +206,109 @@ def sample_one(
     }
 
 
+def refine_constants(
+    tokens: list[str],
+    mantissas: list[float],
+    y_true: np.ndarray,
+    x_grid: np.ndarray,
+    max_iter: int = 100,
+) -> tuple[list[float], float, np.ndarray | None]:
+    """Refine C-token mantissas via L-BFGS-B to minimise MSE.
+
+    Parameters
+    ----------
+    tokens : predicted token sequence
+    mantissas : initial mantissa values (parallel to tokens)
+    y_true : true function values on x_grid
+    x_grid : evaluation grid
+    max_iter : maximum optimiser iterations
+
+    Returns
+    -------
+    (refined_mantissas, mse, y_pred) — refined mantissas list, best MSE, and predictions
+    """
+    # Identify C-token positions and their exponents
+    c_positions = []
+    c_exponents = []
+    for i, tok in enumerate(tokens):
+        if is_constant_token(tok):
+            c_positions.append(i)
+            c_exponents.append(int(tok[1:]))
+
+    if not c_positions:
+        # No constants to refine — just evaluate and return
+        y_pred, err = _eval_expr_on_grid(tokens, mantissas, n_points=len(x_grid))
+        if y_pred is not None:
+            mse = float(np.mean((y_pred - y_true) ** 2))
+            return list(mantissas), mse, y_pred
+        return list(mantissas), float("inf"), None
+
+    x0 = np.array([mantissas[i] for i in c_positions])
+
+    safe_ns = {
+        "e": np.e, "sin": np.sin, "cos": np.cos,
+        "sqrt": np.sqrt, "log": np.log, "abs": np.abs, "pi": np.pi,
+        "__builtins__": {},
+    }
+
+    def objective(params):
+        trial_mantissas = list(mantissas)
+        for j, pos in enumerate(c_positions):
+            trial_mantissas[pos] = float(params[j])
+
+        # Resolve constants
+        resolved = []
+        for tok, m in zip(tokens, trial_mantissas):
+            if is_constant_token(tok):
+                ce = int(tok[1:])
+                resolved.append(m * (10.0 ** ce))
+            else:
+                resolved.append(m)
+
+        try:
+            infix = prefix_to_infix(tokens, resolved)
+        except Exception:
+            return 1e12
+
+        if not infix:
+            return 1e12
+
+        try:
+            ns = dict(safe_ns)
+            ns["x"] = x_grid
+            y = eval(infix, ns)  # noqa: S307
+            y = np.asarray(y, dtype=float)
+            if not np.all(np.isfinite(y)):
+                return 1e12
+            return float(np.mean((y - y_true) ** 2))
+        except Exception:
+            return 1e12
+
+    try:
+        result = minimize(
+            objective, x0, method="L-BFGS-B",
+            options={"maxiter": max_iter, "maxfun": max_iter * 5},
+        )
+        refined_params = result.x
+    except Exception:
+        refined_params = x0
+
+    # Build refined mantissas
+    refined_mantissas = list(mantissas)
+    for j, pos in enumerate(c_positions):
+        refined_mantissas[pos] = float(refined_params[j])
+
+    # Evaluate with refined constants
+    y_pred, err = _eval_expr_on_grid(tokens, refined_mantissas, n_points=len(x_grid))
+    if y_pred is not None:
+        mse = float(np.mean((y_pred - y_true) ** 2))
+    else:
+        mse = float("inf")
+        y_pred = None
+
+    return refined_mantissas, mse, y_pred
+
+
 @torch.no_grad()
 def run_inference(
     model: torch.nn.Module,
@@ -261,6 +365,39 @@ def run_inference(
         candidates.append(cand)
 
     valid = [c for c in candidates if c["mse"] < float("inf")]
+
+    # Gradient-based constant refinement on top candidates
+    do_refine = getattr(config, "refine_constants", False)
+    if do_refine and valid:
+        n_refine = getattr(config, "n_refine_candidates", 5)
+        max_iter = getattr(config, "refine_max_iter", 100)
+        valid.sort(key=lambda c: c["mse"])
+        for cand in valid[:n_refine]:
+            try:
+                refined_m, refined_mse, refined_y = refine_constants(
+                    cand["tokens"], cand["mantissas"], y_true, x_grid,
+                    max_iter=max_iter,
+                )
+                if refined_mse < cand["mse"]:
+                    cand["mantissas"] = refined_m
+                    cand["mse"] = refined_mse
+                    if refined_y is not None:
+                        cand["y_pred"] = refined_y
+                    # Update expr_str with refined constants
+                    resolved = []
+                    for tok, m in zip(cand["tokens"], refined_m):
+                        if is_constant_token(tok):
+                            resolved.append(_reconstruct_value(tok, m))
+                        else:
+                            resolved.append(m)
+                    cand["resolved"] = resolved
+                    try:
+                        cand["expr_str"] = prefix_to_infix(cand["tokens"], resolved)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
     if valid:
         best = min(valid, key=lambda c: c["mse"])
     else:

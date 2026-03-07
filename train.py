@@ -22,7 +22,7 @@ def _compute_lambda(epoch: int, config) -> float:
     if epoch < config.lambda_warmup_epochs:
         return 0.0
     ramp = min(
-        (epoch - config.lambda_warmup_epochs + 1) / max(config.lambda_warmup_epochs, 1),
+        (epoch - config.lambda_warmup_epochs) / max(config.lambda_warmup_epochs, 1),
         1.0,
     )
     return config.lambda_const * ramp
