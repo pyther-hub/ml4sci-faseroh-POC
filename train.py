@@ -122,8 +122,8 @@ def train_one_epoch(
 @torch.no_grad()
 def evaluate(
     model: nn.Module, loader: DataLoader, config,
-) -> float:
-    """Compute average validation loss.
+) -> tuple[float, float]:
+    """Compute average validation loss and sentence-level accuracy.
 
     Parameters
     ----------
@@ -133,13 +133,15 @@ def evaluate(
 
     Returns
     -------
-    float  average validation loss
+    tuple[float, float]  (average validation loss, sentence accuracy)
     """
     model.eval()
     pad_id = token_to_id(config.pad_token)
     ce_loss_fn = nn.CrossEntropyLoss(ignore_index=pad_id)
     total_loss = 0.0
     n_batches = 0
+    n_correct = 0
+    n_total = 0
 
     for batch in loader:
         hist = batch["histogram"].to(config.device)
@@ -155,7 +157,16 @@ def evaluate(
         total_loss += loss.item()
         n_batches += 1
 
-    return total_loss / max(n_batches, 1)
+        # Sentence accuracy: greedy predictions vs true tokens (excluding pad)
+        pred_ids = logits[:, :-1].argmax(dim=-1)  # (B, T-1)
+        true_ids = tgt[:, 1:]                       # (B, T-1)
+        non_pad = true_ids != pad_id
+        correct = ((pred_ids == true_ids) | ~non_pad).all(dim=-1)
+        n_correct += correct.sum().item()
+        n_total += tgt.size(0)
+
+    sentence_acc = n_correct / n_total if n_total > 0 else 0.0
+    return total_loss / max(n_batches, 1), sentence_acc
 
 
 def _print_sample(

@@ -197,7 +197,7 @@ for epoch in range(config.n_epochs):
     print(f"{'='*60}")
 
     train_loss = train_one_epoch(model, train_loader, optimizer, config, epoch)
-    val_loss = evaluate(model, val_loader, config)
+    val_loss, val_sent_acc = evaluate(model, val_loader, config)
 
     saved = ""
     if val_loss < best_val_loss:
@@ -207,7 +207,7 @@ for epoch in range(config.n_epochs):
 
     print(
         f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-        f"best_val={best_val_loss:.4f}{saved}"
+        f"val_sent_acc={val_sent_acc:.4f}  best_val={best_val_loss:.4f}{saved}"
     )
     # _print_sample(model, val_loader, config)
 
