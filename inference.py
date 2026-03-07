@@ -40,22 +40,33 @@ def _reconstruct_value(token: str, mantissa: float) -> float:
     return mantissa * (10.0 ** ce)
 
 
+def _format_prefix_with_constants(tokens: list[str], resolved: list[float]) -> str:
+    """Format prefix token list with resolved constant values for display."""
+    parts = []
+    for tok, val in zip(tokens, resolved):
+        if is_constant_token(tok):
+            parts.append(f"{val:.4g}")
+        else:
+            parts.append(tok)
+    return "[" + ", ".join(parts) + "]"
+
+
 def _eval_expr_on_grid(
     tokens: list[str], mantissas: list[float], n_points: int = 100,
-) -> np.ndarray | None:
+) -> tuple[np.ndarray | None, str | None]:
     """Evaluate a predicted prefix expression on a uniform grid.
 
     Parameters
     ----------
-    tokens : list[str]     predicted token sequence (without <sos>/<eos>)
+    tokens : list[str]      predicted token sequence (without <sos>/<eos>)
     mantissas : list[float] parallel mantissa values
     n_points : int          number of evaluation points
 
     Returns
     -------
-    np.ndarray of shape (n_points,) or None if evaluation fails
+    (y, error) where y is np.ndarray of shape (n_points,) or None,
+    and error is a string description of the failure or None on success.
     """
-    # Resolve C-tokens to their float values for prefix_to_infix
     resolved_mantissas = []
     for tok, m in zip(tokens, mantissas):
         if is_constant_token(tok):
@@ -65,24 +76,26 @@ def _eval_expr_on_grid(
 
     try:
         infix = prefix_to_infix(tokens, resolved_mantissas)
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"prefix_to_infix failed: {e}"
+
+    if not infix:
+        return None, "prefix_to_infix returned an empty string"
 
     x_grid = np.linspace(1e-6, 1 - 1e-6, n_points)
     try:
-        # Safe eval with numpy
         safe_ns = {
             "x": x_grid, "exp": np.e, "sin": np.sin, "cos": np.cos,
             "sqrt": np.sqrt, "log": np.log, "abs": np.abs, "pi": np.pi,
             "__builtins__": {},
         }
-        y = eval(infix, safe_ns)
+        y = eval(infix, safe_ns)  # noqa: S307
         y = np.asarray(y, dtype=float)
         if not np.all(np.isfinite(y)):
-            return None
-        return y
-    except Exception:
-        return None
+            return None, f"expression evaluated to NaN/inf: {infix}"
+        return y, None
+    except Exception as e:
+        return None, f"eval failed on '{infix}': {e}"
 
 
 @torch.no_grad()
@@ -142,26 +155,41 @@ def sample_one(
     out_tokens = [id_to_token(i) for i in seq[1:]]
     out_mantissas = pred_mantissas[1:]
 
-    # Evaluate
-    y_pred = _eval_expr_on_grid(out_tokens, out_mantissas)
-
-    # Build infix string
+    # Build resolved constants and prefix display string
     resolved = []
     for tok, m in zip(out_tokens, out_mantissas):
         if is_constant_token(tok):
             resolved.append(_reconstruct_value(tok, m))
         else:
             resolved.append(m)
+    prefix_display = _format_prefix_with_constants(out_tokens, resolved)
+
+    # Try prefix → infix conversion
+    prefix_error = None
     try:
         expr_str = prefix_to_infix(out_tokens, resolved)
-    except Exception:
+        if not expr_str:
+            prefix_error = "prefix_to_infix returned an empty string"
+            expr_str = "(invalid)"
+    except Exception as e:
+        prefix_error = str(e)
         expr_str = "(invalid)"
+
+    # Only evaluate if prefix conversion succeeded
+    if prefix_error is None:
+        y_pred, eval_error = _eval_expr_on_grid(out_tokens, out_mantissas)
+    else:
+        y_pred, eval_error = None, None
 
     return {
         "tokens": out_tokens,
         "mantissas": out_mantissas,
+        "resolved": resolved,
+        "prefix_display": prefix_display,
         "expr_str": expr_str,
         "y_pred": y_pred,
+        "prefix_error": prefix_error,
+        "eval_error": eval_error,
     }
 
 
@@ -208,7 +236,16 @@ def run_inference(
     candidates = []
     for _ in range(config.n_inference_samples):
         cand = sample_one(model, memory, config)
-        if cand["y_pred"] is not None:
+        if cand["prefix_error"] is not None or cand["eval_error"] is not None:
+            print(f"\n[inference] Invalid prediction — skipping.")
+            print(f"  Prefix + constants : {cand['prefix_display']}")
+            print(f"  Infix              : {cand['expr_str']}")
+            if cand["prefix_error"]:
+                print(f"  Error              : {cand['prefix_error']}")
+            elif cand["eval_error"]:
+                print(f"  Error              : {cand['eval_error']}")
+            cand["mse"] = float("inf")
+        elif cand["y_pred"] is not None:
             cand["mse"] = float(np.mean((cand["y_pred"] - y_true) ** 2))
         else:
             cand["mse"] = float("inf")

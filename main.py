@@ -209,7 +209,7 @@ for epoch in range(config.n_epochs):
         f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
         f"best_val={best_val_loss:.4f}{saved}"
     )
-    _print_sample(model, val_loader, config)
+    # _print_sample(model, val_loader, config)
 
     if (epoch + 1) % config.evaluate_after == 0:
         print(f"\n[Epoch {epoch + 1}] Running evaluation ...")
@@ -274,6 +274,23 @@ for i, fn in enumerate(functions):
     result = run_inference(model, hist_tensor, fn_normed, config)
     best = result["best"]
 
+    is_invalid = (
+        best.get("prefix_error") is not None
+        or best.get("eval_error") is not None
+        or best["expr_str"] in ("(invalid)", "(no valid)")
+    )
+
     print(f"\nFunction {i + 1}:")
-    print(f"  predicted : {best['expr_str']}")
-    print(f"  MSE       : {best['mse']:.6f}")
+    if is_invalid:
+        print(f"  [INVALID — no valid prediction found]")
+        if "prefix_display" in best:
+            print(f"  prefix + constants : {best['prefix_display']}")
+        print(f"  infix              : {best['expr_str']}")
+        if best.get("prefix_error"):
+            print(f"  prefix error       : {best['prefix_error']}")
+        if best.get("eval_error"):
+            print(f"  eval error         : {best['eval_error']}")
+        print(f"  MSE                : {best['mse']:.6f}")
+    else:
+        print(f"  predicted : {best['expr_str']}")
+        print(f"  MSE       : {best['mse']:.6f}")
