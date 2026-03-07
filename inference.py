@@ -15,8 +15,8 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from faseroh.dataset_generation import prefix_to_infix, encode_constant  # noqa: E402
-from faseroh.tokenizer import (  # noqa: E402
+from dataset_generation import prefix_to_infix, encode_constant  # noqa: E402
+from tokenizer import (  # noqa: E402
     token_to_id,
     id_to_token,
     is_constant_token,

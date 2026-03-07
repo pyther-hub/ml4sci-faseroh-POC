@@ -38,7 +38,7 @@ from  train import train_one_epoch, evaluate, _print_sample  # noqa: E402
 
 # ── 2. Configuration ──────────────────────────────────────────────────────────
 
-DATASET_JSON_PATH: str = "data/dataset_demo_5k.json"
+DATASET_JSON_PATH: str = "data/dataset_demo_1k.json"
 
 
 @dataclass
@@ -99,8 +99,6 @@ def _load_json_records(path: str) -> list[dict]:
     for rec in raw:
         hist = rec["histogram"]
         hist["bins"] = np.array(hist["bins"], dtype=int)
-        hist["edges"] = np.array(hist["edges"], dtype=float)
-        hist["means"] = np.array(hist["means"], dtype=float)
         rec["histogram"] = hist
         records.append(rec)
     return records

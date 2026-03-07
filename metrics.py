@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from faseroh.inference import run_inference, _eval_expr_on_grid  # noqa: E402
+from inference import run_inference, _eval_expr_on_grid  # noqa: E402
 
 
 # ── Arity table (mirrors dataset_generation._ARITY) ──────────────────────────
@@ -134,7 +134,7 @@ def evaluate_predictions(
     -------
     dict with keys: r2_mean, r2_median, sentence_acc, prefix_validity_acc
     """
-    from faseroh.tokenizer import id_to_token, token_to_id  # noqa
+    from tokenizer import id_to_token, token_to_id  # noqa
 
     model.eval()
     all_r2 = []

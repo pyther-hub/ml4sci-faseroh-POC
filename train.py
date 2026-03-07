@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from faseroh.tokenizer import token_to_id, id_to_token, is_constant_token, build_vocabulary
+from tokenizer import token_to_id, id_to_token, is_constant_token, build_vocabulary
 
 
 def _get_const_ids(device: torch.device) -> set[int]:

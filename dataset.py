@@ -18,8 +18,8 @@ from torch.utils.data import Dataset, DataLoader
 # Allow importing from parent directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from faseroh.dataset_generation import generate_dataset  # noqa: E402
-from faseroh.tokenizer import (  # noqa: E402
+from dataset_generation import generate_dataset  # noqa: E402
+from tokenizer import (  # noqa: E402
     token_to_id,
     tokens_to_ids,
     is_constant_token,

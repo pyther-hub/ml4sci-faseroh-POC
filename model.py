@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from faseroh.tokenizer import get_vocab_size, is_constant_token, build_vocabulary
+from tokenizer import get_vocab_size, is_constant_token, build_vocabulary
 
 
 class PositionalEncoding(nn.Module):
