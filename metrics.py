@@ -228,8 +228,12 @@ def evaluate_predictions(
 
             # Function validity + R²
             if run_fnv or run_r2 or run_gof:
-                y_pred = _eval_expr_on_grid(best["tokens"], best["mantissas"], n_points=200)
-                fn_valid = y_pred is not None
+                has_unk = "<unk>" in best["tokens"]
+                if has_unk:
+                    y_pred, fn_valid = None, False
+                else:
+                    y_pred, _ = _eval_expr_on_grid(best["tokens"], best["mantissas"], n_points=200)
+                    fn_valid = y_pred is not None
                 fn_valid_count += int(fn_valid)
 
                 if run_r2:
@@ -288,7 +292,8 @@ def evaluate_predictions(
     if run_pfx:
         print(f"  Prefix validity acc   : {metrics['prefix_validity_acc']:.4f}")
     if run_fnv or run_r2 or run_gof:
-        print(f"  Function validity acc : {metrics['fn_validity_acc']:.4f}  ({fn_valid_count}/{n_total} evaluable)")
+        n_invalid = n_total - fn_valid_count
+        print(f"  Function validity acc : {metrics['fn_validity_acc']:.4f}  ({fn_valid_count} valid, {n_invalid} invalid out of {n_total})")
     if run_gof:
         if all_gof:
             print(f"  GoF chi2/ndf mean     : {metrics['gof_mean']:.4f}  (≈1 is good fit)")

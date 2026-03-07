@@ -171,6 +171,9 @@ def sample_one(
         if not expr_str:
             prefix_error = "prefix_to_infix returned an empty string"
             expr_str = "(invalid)"
+        elif "?" in expr_str:
+            prefix_error = "incomplete expression (missing arguments for operator)"
+            expr_str = "(invalid)"
     except Exception as e:
         prefix_error = str(e)
         expr_str = "(invalid)"
@@ -233,22 +236,19 @@ def run_inference(
             "all_candidates": [],
         }
 
+    n_invalid = 0
     candidates = []
     for _ in range(config.n_inference_samples):
         cand = sample_one(model, memory, config)
-        if cand["prefix_error"] is not None or cand["eval_error"] is not None:
-            print(f"\n[inference] Invalid prediction — skipping.")
-            print(f"  Prefix + constants : {cand['prefix_display']}")
-            print(f"  Infix              : {cand['expr_str']}")
-            if cand["prefix_error"]:
-                print(f"  Error              : {cand['prefix_error']}")
-            elif cand["eval_error"]:
-                print(f"  Error              : {cand['eval_error']}")
+        has_unk = "<unk>" in cand["tokens"]
+        if has_unk or cand["prefix_error"] is not None or cand["eval_error"] is not None:
             cand["mse"] = float("inf")
+            n_invalid += 1
         elif cand["y_pred"] is not None:
             cand["mse"] = float(np.mean((cand["y_pred"] - y_true) ** 2))
         else:
             cand["mse"] = float("inf")
+            n_invalid += 1
         candidates.append(cand)
 
     valid = [c for c in candidates if c["mse"] < float("inf")]
@@ -257,4 +257,4 @@ def run_inference(
     else:
         best = candidates[0] if candidates else {"tokens": [], "mantissas": [], "expr_str": "(no valid)", "mse": float("inf")}
 
-    return {"best": best, "all_candidates": candidates}
+    return {"best": best, "all_candidates": candidates, "n_invalid": n_invalid}

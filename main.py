@@ -26,9 +26,9 @@ import torch
 from scipy import integrate as sci_integrate
 from torch.utils.data import DataLoader
 from dataset import FASeROHDataset, collate_fn          # noqa: E402
-from dataset_generation import generate_histogram        # noqa: E402
-from inference import run_inference                      # noqa: E402
-from metrics import evaluate_predictions                 # noqa: E402
+from dataset_generation import generate_histogram, goodness_of_fit  # noqa: E402
+from inference import run_inference                                  # noqa: E402
+from metrics import evaluate_predictions, r2_score, _pred_fn_from_tokens  # noqa: E402
 from model import FASeROH                               # noqa: E402
 from  train import train_one_epoch, evaluate, _print_sample  # noqa: E402
 
@@ -250,6 +250,9 @@ print("\n" + "=" * 55)
 print("  Custom function inference")
 print("=" * 55)
 
+_x_grid_r2 = np.linspace(1e-6, 1 - 1e-6, 100)
+n_invalid_custom = 0
+
 for i, fn in enumerate(functions):
     x_grid = np.linspace(1e-6, 1 - 1e-6, 500)
     ys = fn(x_grid)
@@ -277,22 +280,37 @@ for i, fn in enumerate(functions):
     best = result["best"]
 
     is_invalid = (
-        best.get("prefix_error") is not None
+        "<unk>" in best.get("tokens", [])
+        or best.get("prefix_error") is not None
         or best.get("eval_error") is not None
         or best["expr_str"] in ("(invalid)", "(no valid)")
+        or best.get("y_pred") is None
     )
 
     print(f"\nFunction {i + 1}:")
     if is_invalid:
-        print(f"  [INVALID — no valid prediction found]")
-        if "prefix_display" in best:
-            print(f"  prefix + constants : {best['prefix_display']}")
-        print(f"  infix              : {best['expr_str']}")
-        if best.get("prefix_error"):
-            print(f"  prefix error       : {best['prefix_error']}")
-        if best.get("eval_error"):
-            print(f"  eval error         : {best['eval_error']}")
-        print(f"  MSE                : {best['mse']:.6f}")
+        n_invalid_custom += 1
     else:
-        print(f"  predicted : {best['expr_str']}")
-        print(f"  MSE       : {best['mse']:.6f}")
+        # R² score
+        y_true_r2 = fn_normed(_x_grid_r2)
+        r2 = r2_score(y_true_r2, best["y_pred"])
+
+        # Goodness-of-fit
+        gof_val = None
+        pred_fn = _pred_fn_from_tokens(best["tokens"], best["mantissas"])
+        if pred_fn is not None:
+            try:
+                gof_result = goodness_of_fit(pred_fn, histogram)
+                gof_val = gof_result["X_per_ndf"]
+            except Exception:
+                pass
+
+        print(f"  predicted  : {best['expr_str']}")
+        print(f"  MSE        : {best['mse']:.6f}")
+        print(f"  R²         : {r2:.4f}")
+        if gof_val is not None:
+            print(f"  GoF χ²/ndf : {gof_val:.4f}  (≈1 is good fit)")
+        else:
+            print(f"  GoF χ²/ndf : N/A")
+
+print(f"\n  Invalid: {n_invalid_custom}/{len(functions)} functions had no valid prediction")
