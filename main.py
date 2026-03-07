@@ -25,9 +25,6 @@ import numpy as np
 import torch
 from scipy import integrate as sci_integrate
 from torch.utils.data import DataLoader
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from dataset import FASeROHDataset, collate_fn          # noqa: E402
 from dataset_generation import generate_histogram        # noqa: E402
 from inference import run_inference                      # noqa: E402
@@ -78,6 +75,11 @@ class FASeROHConfig:
     # Inference
     top_k: int = 10
     n_inference_samples: int = 50
+
+    # Evaluation — set which metrics to compute.
+    # Available: "r2", "sentence_acc", "prefix_validity", "fn_validity", "gof"
+    # Remove "gof" if goodness-of-fit is causing crashes / wrong outputs.
+    eval_metrics: tuple = ("r2", "sentence_acc", "prefix_validity", "fn_validity", "gof")
 
 
 config = FASeROHConfig()
