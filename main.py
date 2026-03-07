@@ -61,11 +61,12 @@ class FASeROHConfig:
     eos_token: str = "<eos>"
 
     # Model architecture
-    d_model: int = 256
+    d_model: int = 360
     n_heads: int = 8
     n_enc_layers: int = 4
     n_dec_layers: int = 6
     n_latent: int = 32
+    use_conv: bool = True
     conv_kernel: int = 3
     dropout: float = 0.1
 
@@ -203,6 +204,9 @@ print(f"Device           : {config.device}")
 # ── 6. Training loop ──────────────────────────────────────────────────────────
 
 optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    optimizer, T_max=config.n_epochs, eta_min=1e-6,
+)
 best_val_loss = float("inf")
 
 ckpt_dir = Path(config.checkpoint_path).parent
@@ -225,11 +229,14 @@ for epoch in range(config.n_epochs):
         torch.save(model.state_dict(), config.checkpoint_path)
         saved = " [saved]"
 
+    lr_now = scheduler.get_last_lr()[0]
     print(
         f"  train_loss={train_loss:.4f}  train_sent_acc={train_sent_acc:.4f}  "
         f"val_loss={val_loss:.4f}  val_sent_acc={val_sent_acc:.4f}  "
-        f"val_tok_acc={val_tok_acc:.4f}  best_val={best_val_loss:.4f}{saved}"
+        f"val_tok_acc={val_tok_acc:.4f}  best_val={best_val_loss:.4f}  "
+        f"lr={lr_now:.2e}{saved}"
     )
+    scheduler.step()
     # _print_sample(model, val_loader, config)
 
 print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")

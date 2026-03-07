@@ -66,13 +66,15 @@ class HistogramEncoder(nn.Module):
     def __init__(self, config) -> None:
         super().__init__()
         d = config.d_model
-        k = config.conv_kernel
-        pad = k // 2
+        self.use_conv = getattr(config, "use_conv", True)
 
         self.proj = nn.Linear(1, d)
-        self.conv1 = nn.Conv1d(d, d, kernel_size=k, padding=pad)
-        self.conv2 = nn.Conv1d(d, d, kernel_size=k, padding=pad)
-        self.act = nn.GELU()
+        if self.use_conv:
+            k = config.conv_kernel
+            pad = k // 2
+            self.conv1 = nn.Conv1d(d, d, kernel_size=k, padding=pad)
+            self.conv2 = nn.Conv1d(d, d, kernel_size=k, padding=pad)
+            self.act = nn.GELU()
         self.pos_enc = PositionalEncoding(d, dropout=config.dropout)
 
         enc_layer = nn.TransformerEncoderLayer(
@@ -106,11 +108,12 @@ class HistogramEncoder(nn.Module):
         """
         h = self.proj(histogram)  # (B, K, d)
 
-        # Conv layers expect (B, d, K)
-        h = h.transpose(1, 2)
-        h = self.act(self.conv1(h))
-        h = self.act(self.conv2(h))
-        h = h.transpose(1, 2)  # back to (B, K, d)
+        if self.use_conv:
+            # Conv layers expect (B, d, K)
+            h = h.transpose(1, 2)
+            h = self.act(self.conv1(h))
+            h = self.act(self.conv2(h))
+            h = h.transpose(1, 2)  # back to (B, K, d)
 
         h = self.pos_enc(h)
         h = self.transformer(h, src_key_padding_mask=src_key_padding_mask)
