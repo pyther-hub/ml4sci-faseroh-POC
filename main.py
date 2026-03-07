@@ -64,7 +64,7 @@ class FASeROHConfig:
     batch_size: int = 64
     lr: float = 1e-4
     n_epochs: int = 30
-    evaluate_after: int = 5
+    evaluate_after: int = 1
     lambda_const: float = 0.1
     lambda_warmup_epochs: int = 5
     grad_clip: float = 1.0

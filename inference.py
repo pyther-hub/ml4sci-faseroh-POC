@@ -20,6 +20,7 @@ from tokenizer import (  # noqa: E402
     token_to_id,
     id_to_token,
     is_constant_token,
+    is_valid_prefix,
     build_vocabulary,
 )
 
@@ -164,21 +165,29 @@ def sample_one(
             resolved.append(m)
     prefix_display = _format_prefix_with_constants(out_tokens, resolved)
 
-    # Try prefix → infix conversion
+    # ── Step 1: Validate prefix expression structure ───────────────────────────
+    # Check arity constraints before any infix conversion or constant evaluation.
     prefix_error = None
-    try:
-        expr_str = prefix_to_infix(out_tokens, resolved)
-        if not expr_str:
-            prefix_error = "prefix_to_infix returned an empty string"
+    if not is_valid_prefix(out_tokens):
+        prefix_error = "invalid prefix structure (arity constraint violated)"
+
+    # ── Step 2: Prefix → infix conversion (only if structure is valid) ─────────
+    if prefix_error is None:
+        try:
+            expr_str = prefix_to_infix(out_tokens, resolved)
+            if not expr_str:
+                prefix_error = "prefix_to_infix returned an empty string"
+                expr_str = "(invalid)"
+            elif "?" in expr_str:
+                prefix_error = "incomplete expression (missing arguments for operator)"
+                expr_str = "(invalid)"
+        except Exception as e:
+            prefix_error = str(e)
             expr_str = "(invalid)"
-        elif "?" in expr_str:
-            prefix_error = "incomplete expression (missing arguments for operator)"
-            expr_str = "(invalid)"
-    except Exception as e:
-        prefix_error = str(e)
+    else:
         expr_str = "(invalid)"
 
-    # Only evaluate if prefix conversion succeeded
+    # ── Step 3: Evaluate expression on grid (only if prefix is fully valid) ────
     if prefix_error is None:
         y_pred, eval_error = _eval_expr_on_grid(out_tokens, out_mantissas)
     else:

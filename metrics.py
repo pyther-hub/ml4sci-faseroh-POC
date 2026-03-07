@@ -21,13 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dataset_generation import goodness_of_fit, prefix_to_infix  # noqa: E402
 from inference import run_inference, _eval_expr_on_grid  # noqa: E402
-
-
-# ── Arity table (mirrors dataset_generation._ARITY) ──────────────────────────
-_ARITY = {
-    "+": 2, "mul": 2, "pow": 2,
-    "sqrt": 1, "exp": 1, "log": 1, "sin": 1, "cos": 1, "tan": 1, "abs": 1,
-}
+from tokenizer import is_valid_prefix  # noqa: E402
 
 
 def r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -76,31 +70,6 @@ def sentence_accuracy(
     return correct / len(pred_tokens)
 
 
-def _is_valid_prefix(tokens: list[str]) -> bool:
-    """Check if a prefix token sequence forms a valid expression tree.
-
-    Parameters
-    ----------
-    tokens : list[str]  token sequence (without <sos>/<eos>/<pad>)
-
-    Returns
-    -------
-    bool
-    """
-    if not tokens:
-        return False
-    counter = 1  # expecting one expression
-    for tok in tokens:
-        if counter <= 0:
-            return False
-        counter -= 1
-        arity = _ARITY.get(tok, None)
-        if arity is not None:
-            counter += arity
-        # leaves (x, ints, C-tokens) have arity 0 → no addition
-    return counter == 0
-
-
 def prefix_validity_accuracy(pred_tokens_list: list[list[str]]) -> float:
     """Fraction of predictions that are syntactically valid prefix expressions.
 
@@ -114,7 +83,7 @@ def prefix_validity_accuracy(pred_tokens_list: list[list[str]]) -> float:
     """
     if not pred_tokens_list:
         return 0.0
-    valid = sum(_is_valid_prefix(toks) for toks in pred_tokens_list)
+    valid = sum(is_valid_prefix(toks) for toks in pred_tokens_list)
     return valid / len(pred_tokens_list)
 
 

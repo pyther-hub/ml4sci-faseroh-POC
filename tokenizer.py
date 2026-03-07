@@ -26,6 +26,19 @@ _CONST_SET = set(_CONST_TOKENS)
 _MATH_CONST_SET = set(_MATH_CONSTANTS)
 _LEAF_SET = set(_VARIABLE) | _MATH_CONST_SET | set(_SMALL_INTS) | _CONST_SET
 
+# Arity of each operator token (leaves have arity 0 and are not listed here)
+_ARITY: dict[str, int] = {
+    "+":    2,
+    "mul":  2,
+    "pow":  2,
+    "sqrt": 1,
+    "log":  1,
+    "sin":  1,
+    "cos":  1,
+    "tan":  1,
+    "abs":  1,
+}
+
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -146,3 +159,36 @@ def is_leaf_token(token: str) -> bool:
     bool
     """
     return token in _LEAF_SET
+
+
+def is_valid_prefix(tokens: list[str]) -> bool:
+    """Check whether a token sequence forms a syntactically valid prefix expression tree.
+
+    Uses the arity of each operator to count how many sub-expressions are still
+    expected.  A sequence is valid iff:
+    - It is non-empty.
+    - No token is consumed when zero sub-expressions are expected.
+    - Exactly zero sub-expressions remain when the sequence ends.
+
+    Parameters
+    ----------
+    tokens : list[str]
+        Token sequence (without <sos>, <eos>, <pad>).
+
+    Returns
+    -------
+    bool
+        True if the sequence is a complete, well-formed prefix expression.
+    """
+    if not tokens:
+        return False
+    counter = 1  # we expect exactly one complete expression
+    for tok in tokens:
+        if counter <= 0:
+            return False  # extra tokens beyond a complete expression
+        counter -= 1
+        arity = _ARITY.get(tok, None)
+        if arity is not None:
+            counter += arity
+        # leaf tokens (x, ints, C-tokens, pi, exp) contribute 0 children
+    return counter == 0
