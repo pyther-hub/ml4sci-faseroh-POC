@@ -10,19 +10,21 @@ from __future__ import annotations
 # ── POC vocabulary definition ─────────────────────────────────────────────────
 
 _SPECIAL = ["<pad>", "<sos>", "<eos>", "<unk>"]
-_OPERATORS = ["+", "mul", "pow", "sqrt", "exp", "sin", "cos"]
+_OPERATORS = ["+", "mul", "pow", "sqrt", "log", "sin", "cos"]
 _VARIABLE = ["x"]
+_MATH_CONSTANTS = ["pi", "exp"]  # π and Euler's number as single tokens
 _SMALL_INTS = [str(i) for i in range(-5, 6)]
 _CONST_TOKENS = [f"C{ce}" for ce in range(-4, 5)]
 
-_ALL_TOKENS: list[str] = _SPECIAL + _OPERATORS + _VARIABLE + _SMALL_INTS + _CONST_TOKENS
+_ALL_TOKENS: list[str] = _SPECIAL + _OPERATORS + _VARIABLE + _MATH_CONSTANTS + _SMALL_INTS + _CONST_TOKENS
 
 _TOKEN2ID: dict[str, int] = {tok: idx for idx, tok in enumerate(_ALL_TOKENS)}
 _ID2TOKEN: dict[int, str] = {idx: tok for tok, idx in _TOKEN2ID.items()}
 
 _OPERATOR_SET = set(_OPERATORS)
 _CONST_SET = set(_CONST_TOKENS)
-_LEAF_SET = set(_VARIABLE) | set(_SMALL_INTS) | _CONST_SET
+_MATH_CONST_SET = set(_MATH_CONSTANTS)
+_LEAF_SET = set(_VARIABLE) | _MATH_CONST_SET | set(_SMALL_INTS) | _CONST_SET
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

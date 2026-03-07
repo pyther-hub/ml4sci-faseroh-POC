@@ -1,19 +1,16 @@
 """
-FASEROH Function Generator
-==========================
-Implements Algorithm 1 and Algorithm 2 from the FASEROH paper:
-  "Fast Accurate Symbolic Empirical Representation Of Histograms"
-
+FASEROH Dataset Generator — Algorithm 1
+========================================
 Pipeline
 --------
 1.  generate_function()   – build + normalise a random symbolic f(x) over [0,1]
 2.  validate_function()   – check positivity, finiteness, normalisation
-3.  generate_histogram()  – Algorithm 1: sample N counts into K bins from f(x)
+3.  generate_histogram()  – Algorithm 1: integrate f(x) over K bins, Poisson sample
 4.  infix_to_prefix()     – convert SymPy expr → preorder token list
 5.  prefix_to_infix()     – reconstruct infix string from preorder tokens
 6.  encode_constants()    – replace numeric tokens with C{ce} + mantissa
 7.  encode_expression()   – end-to-end: SymPy expr → {tokens, mantissas}
-8.  generate_dataset()    – batch generation with verbose timing
+8.  generate_dataset()    – batch generation
 """
 
 import random
@@ -65,9 +62,6 @@ def make_linear():
 
 
 def make_exponential():
-    # lam is a unary multiplier inside exp(lam*x) — invariant to normalisation.
-    # Restricted to [-3, 3] (non-zero) so exp(lam*x) stays well-behaved over
-    # [0,1]: exp(3) ≈ 20, small enough to avoid near-zero post-norm coefficients.
     if random.random() < 0.80:
         lam = float(random.choice([-3, -2, -1, 1, 2, 3]))
     else:
@@ -81,9 +75,6 @@ def make_exponential():
 
 
 def make_gaussian():
-    # mu ∈ [0.15, 0.85] keeps the peak visible within [0,1].
-    # sigma ∈ [0.10, 0.40] — lower bound raised from 0.05 to prevent the exponent
-    # amplifying to extreme values (e.g. -88x²) when composed via * or /.
     mu = sample_float_param(0.15, 0.85)
     sigma = sample_float_param(0.10, 0.40)
     return BaseFunc(
@@ -95,8 +86,6 @@ def make_gaussian():
 
 
 def make_power_law():
-    # alpha ∈ (-0.5, 3.0): negative values give integrable divergence at 0,
-    # upper bound lowered from 4.0 to 3.0 to avoid steeply vanishing shapes.
     alpha = sample_float_param(-0.5, 3.0)
     return BaseFunc(
         np_fn=lambda x, a=alpha: np.where(
@@ -109,9 +98,6 @@ def make_power_law():
 
 
 def make_sine_bump():
-    # n is a unary multiplier inside sin(n*pi*x)² — invariant to normalisation.
-    # Capped at 3: sin(4πx)² already has 4 bumps over [0,1], higher n causes
-    # rapid oscillation that is hard to represent with moderate K bins.
     if random.random() < 0.80:
         n = random.choice([1, 2, 3])
     else:
@@ -123,8 +109,6 @@ def make_sine_bump():
 
 
 def make_cosine_arch():
-    # n is a unary multiplier inside cos(n*pi*x) — invariant to normalisation.
-    # Kept at {1, 2}: 1+cos(πx) is one smooth arch, 1+cos(2πx) is two arches.
     if random.random() < 0.80:
         n = random.choice([1, 2])
     else:
@@ -136,8 +120,6 @@ def make_cosine_arch():
 
 
 def make_beta_kernel():
-    # a, b ∈ [0.5, 2.5]: upper bound tightened from 5.0 — large exponents
-    # produce ∫f dx in the hundreds of thousands, giving extreme post-norm coefficients.
     a = sample_float_param(0.5, 2.5)
     b = sample_float_param(0.5, 2.5)
 
@@ -157,8 +139,9 @@ def make_beta_kernel():
 
 def make_polynomial():
     degree = random.choice([2, 3])
-    coeffs = [max(sample_float_param(0.0, 2.0), 0.0) for _ in range(degree + 1)]
-    coeffs[0] = max(coeffs[0], 0.1)
+    coeffs = [sample_float_param(-2.0, 2.0) for _ in range(degree + 1)]
+    while abs(coeffs[0]) < 0.1:
+        coeffs[0] = sample_float_param(-2.0, 2.0)
 
     def np_fn(x, c=coeffs):
         xv = np.asarray(x, float)
@@ -171,9 +154,6 @@ def make_polynomial():
 
 
 def make_breit_wigner():
-    # x0 ∈ [0.2, 0.8]: keeps peak well within [0,1].
-    # gam ∈ [0.15, 0.4]: lower bound raised from 0.05 — narrow widths produce
-    # spikes that dominate the shape and are numerically fragile in composition.
     x0 = sample_float_param(0.2, 0.8)
     gam = sample_float_param(0.15, 0.40)
     return BaseFunc(
@@ -184,9 +164,6 @@ def make_breit_wigner():
 
 
 def make_log_bump():
-    # sigma ∈ [0.3, 0.8]: upper bound lowered slightly for smoother shapes.
-    # Offset 0.001 replaces 1e-6 — large enough to display cleanly (not 0.000)
-    # while still keeping log(x + 0.001) ≈ log(x) for x >> 0.001.
     mu = sample_float_param(-1.0, 0.5)
     sigma = sample_float_param(0.3, 0.8)
     eps = 0.001
@@ -209,15 +186,6 @@ SMALL_INTS: set = set(range(-5, 6))   # -5 … 5  (own vocab tokens)
 
 
 def sample_unary_multiplier(allow_zero: bool = False) -> float:
-    """Sampler for integer multipliers inside unary functions (e.g. sin(nx), exp(λx)).
-
-    These parameters sit inside f(c·x) and are therefore invariant to the
-    normalisation step — dividing f by ∫f dx does not change the multiplier c.
-    So integer tokens here are genuinely meaningful.
-
-    80 % → non-zero integer from {-5, …, 5}
-    20 % → float sampled uniformly from (-5, 5)
-    """
     if random.random() < 0.80:
         candidates = [i for i in range(-5, 6) if (allow_zero or i != 0)]
         return float(random.choice(candidates))
@@ -229,20 +197,10 @@ def sample_unary_multiplier(allow_zero: bool = False) -> float:
 
 
 def sample_float_param(low: float, high: float) -> float:
-    """Sampler for shape/position parameters (mu, sigma, alpha, etc.).
-
-    These are always floats — they do not survive normalisation as integers
-    and have no reason to be constrained to the integer vocabulary.
-    """
     return round(random.uniform(low, high), 3)
 
 
 def sample_weight() -> float:
-    """Sampler for binary operator scale weights ω (used only with '+').
-
-    Floats only, uniformly from (-5, 5) per the constant sampling spec.
-    Zero is excluded since a zero weight nullifies a term entirely.
-    """
     val = round(random.uniform(-5.0, 5.0), 3)
     while abs(val) < 0.1:
         val = round(random.uniform(-5.0, 5.0), 3)
@@ -250,11 +208,6 @@ def sample_weight() -> float:
 
 
 def make_constant():
-    """Base function that is a non-zero float constant (scalar).
-
-    Deliberately always a float — a bare constant c becomes c/I after
-    normalisation, which is not an integer in general.
-    """
     c = sample_float_param(-5.0, 5.0)
     while abs(c) < 1e-9:
         c = sample_float_param(-5.0, 5.0)
@@ -275,6 +228,7 @@ BASE_FACTORIES = [
     make_beta_kernel,
     make_polynomial,
     make_breit_wigner,
+    make_log_bump,
     make_constant,
 ]
 
@@ -289,10 +243,10 @@ FACTORY_WEIGHTS = [
     2,   # beta_kernel
     4,   # polynomial
     1,   # breit_wigner
+    2,   # log_bump
     3,   # constant
 ]
 
-# ── Name-to-factory mapping for config-driven filtering ──────────────────────
 FACTORY_NAME_MAP: dict = {
     "uniform":      (make_uniform,      1),
     "linear":       (make_linear,       1),
@@ -304,24 +258,12 @@ FACTORY_NAME_MAP: dict = {
     "beta_kernel":  (make_beta_kernel,  2),
     "polynomial":   (make_polynomial,   4),
     "breit_wigner": (make_breit_wigner, 1),
+    "log_bump":     (make_log_bump,     2),
     "constant":     (make_constant,     3),
 }
 
 
 def get_filtered_factories(allowed: list[str]) -> tuple[list, list]:
-    """Return a filtered (factories, weights) pair for the given names.
-
-    Parameters
-    ----------
-    allowed : list of factory name strings, e.g. ["sine_bump", "exponential"]
-              Valid names: "uniform", "linear", "exponential", "gaussian",
-              "power_law", "sine_bump", "cosine_arch", "beta_kernel",
-              "polynomial", "breit_wigner", "constant"
-
-    Returns
-    -------
-    (filtered_factories, filtered_weights)
-    """
     factories, weights = [], []
     for name in allowed:
         if name not in FACTORY_NAME_MAP:
@@ -334,11 +276,8 @@ def get_filtered_factories(allowed: list[str]) -> tuple[list, list]:
         weights.append(w)
     return factories, weights
 
-# Division removed from composition operators — dividing by a base function
-# (especially power laws, log bumps, or Breit-Wigners) routinely produces
-# extreme normalisation constants and near-zero coefficients after normalisation.
-# The two remaining operators + and * are sufficient for moderate complexity.
-OPERATORS = ["+", "*"]
+
+OPERATORS = ["+", "*", "-"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -346,23 +285,15 @@ OPERATORS = ["+", "*"]
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ComposedFunc:
-    """List of (operator, BaseFunc, weight) triples.
-
-    Call normalise(area) to bake normalisation into term weights so that
-    ∫₀¹ f(x) dx = 1.
-    """
+    """List of (operator, BaseFunc, weight) triples."""
 
     def __init__(self):
-        self.terms: list = []          # (operator, BaseFunc, weight)
-        self.normalisation_constant: float = 1.0
+        self.terms: list = []
 
     def add(self, op: str, func: BaseFunc, weight: float = 1.0):
         self.terms.append((op, func, weight))
 
     def normalise(self, area_under_curve: float):
-        """Divide every term weight by the integral so the function integrates
-        to 1 over [0, 1]."""
-        self.normalisation_constant = area_under_curve
         self.terms = [
             (op, fn, w / area_under_curve)
             for op, fn, w in self.terms
@@ -378,6 +309,8 @@ class ComposedFunc:
                 result = result + w * b
             elif op == "*":
                 result = result * b
+            elif op == "-":
+                result = result - w * b
         return result
 
     def sympy_expr(self):
@@ -389,6 +322,8 @@ class ComposedFunc:
                 expr = expr + w * b
             elif op == "*":
                 expr = expr * b
+            elif op == "-":
+                expr = expr - w * b
         return expr
 
 
@@ -401,21 +336,13 @@ def generate_function(
     max_attempts: int = 100,
     allowed_factories: Optional[list[str]] = None,
 ) -> Optional[dict]:
-    """Algorithm 2: build and normalise a random symbolic f(x) over [0,1].
-
-    Normalisation is performed here. Validation is NOT done here; call
-    validate_function() on the returned dict separately.
+    """Build and normalise a random symbolic f(x) over [0,1].
 
     Returns
     -------
     dict:
-        numpy_fn      – ComposedFunc (normalised callable)
-        sympy_expr    – SymPy expression (simplified where possible)
-        expr_str      – str of sympy_expr
-        latex         – LaTeX string of sympy_expr
-        n_components  – number of base functions combined (m)
-        operators     – list of operators used between components
-        norm_const    – ∫₀¹ f_raw dx (before normalisation)
+        numpy_fn   – ComposedFunc (normalised callable)
+        sympy_expr – SymPy expression (used internally for encoding)
     or None if all attempts fail.
     """
     if allowed_factories is not None:
@@ -433,7 +360,6 @@ def generate_function(
                 random.choices(filt_factories, weights=filt_weights, k=1)[0](),
                 weight=1.0,
             )
-            ops_used: list = []
 
             for _ in range(m - 1):
                 op = random.choice(OPERATORS)
@@ -443,7 +369,6 @@ def generate_function(
                     random.choices(filt_factories, weights=filt_weights, k=1)[0](),
                     weight=w,
                 )
-                ops_used.append(op)
 
             # Quick pre-check on dense grid
             xs = np.linspace(1e-6, 1 - 1e-6, 500)
@@ -462,18 +387,13 @@ def generate_function(
             if not (math.isfinite(I) and I > 0):
                 continue
 
-            # Reject if normalisation constant is extreme — this means the
-            # raw function has very low mass (I << 1) or very high mass (I >> 1),
-            # which after dividing by I produces coefficients like 0.000 or 70000.
-            # Bound of 500 allows reasonable shapes while blocking pathological ones.
             if I > 500 or I < 0.001:
                 continue
 
-            norm_const = I
-            comp.normalise(norm_const)
+            comp.normalise(I)
 
-            # Build SymPy expression with 5-second simplification timeout
-            raw_expr = comp.sympy_expr() / norm_const
+            # Build SymPy expression with 5-second timeout
+            raw_expr = comp.sympy_expr() / I
 
             def _alarm(signum, frame):
                 raise TimeoutError
@@ -487,22 +407,12 @@ def generate_function(
             finally:
                 signal.alarm(0)
 
-            try:
-                latex_str = sp.latex(sym_expr)
-                expr_str = str(sym_expr)
-            except Exception:
-                sym_expr = None
-                latex_str = "(complex expression)"
-                expr_str = "(complex expression)"
+            if sym_expr is None:
+                continue
 
             return {
-                "numpy_fn": comp,
+                "numpy_fn":   comp,
                 "sympy_expr": sym_expr,
-                "expr_str": expr_str,
-                "latex": latex_str,
-                "n_components": m,
-                "operators": ops_used,
-                "norm_const": norm_const,
             }
 
         except Exception:
@@ -516,25 +426,11 @@ def generate_function(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def validate_function(result: dict, tol: float = 0.03) -> tuple:
-    """Validate a generated function dict returned by generate_function().
+    """Validate a generated function dict.
 
-    Checks performed
-    ----------------
-    1. numpy_fn is callable
-    2. f(x) is finite for all x in [0, 1]
-    3. f(x) >= 0 for all x in [0, 1]
-    4. ∫₀¹ f(x) dx ∈ [1 - tol, 1 + tol]  (normalisation check)
-    5. sympy_expr is not None
+    Checks: callable, finite, non-negative, normalised to 1, sympy_expr not None.
 
-    Parameters
-    ----------
-    result : dict returned by generate_function()
-    tol    : allowed deviation from 1.0 for the integral (default 0.03 = 3%)
-
-    Returns
-    -------
-    (is_valid: bool, reason: str)
-        reason is "OK" on success, or a short description of the failure.
+    Returns (is_valid: bool, reason: str).
     """
     if result is None:
         return False, "result is None"
@@ -589,22 +485,16 @@ def generate_histogram(
 ) -> dict:
     """Algorithm 1: generate a histogram H from normalised f(x).
 
-    Parameters
-    ----------
-    numpy_fn  : normalised callable, ∫₀¹ f dx = 1
-    N         : total histogram count (random in [n_min, n_max] if None)
-    K         : number of bins        (random in [k_min, k_max] if None)
-    n_min/max : range for random N
-    k_min/max : range for random K
+    For each bin k:
+        n_k = N * integral of f(x) over bin   (expected count)
+        N_k ~ Poisson(n_k)                     (sampled count)
 
     Returns
     -------
     dict:
-        bins   – ndarray (K,)   integer bin counts N_k
-        edges  – ndarray (K+1,) bin edges in [0, 1]
-        means  – ndarray (K,)   expected mean counts n_k = N * ∫_bin f dx
-        N      – total count used
-        K      – number of bins used
+        bins – ndarray (K,) integer bin counts N_k
+        N    – total event count used
+        K    – number of bins used
     """
     if N is None:
         N = random.randint(n_min, n_max)
@@ -620,15 +510,12 @@ def generate_histogram(
         )
         means[k] = max(N * integral, 0.0)
 
-    # Sample bin counts from Poisson distribution (Poisson data per the paper)
     bins = np.random.poisson(means).astype(int)
 
     return {
         "bins": bins,
-        "edges": edges,
-        "means": means,
-        "N": N,
-        "K": K,
+        "N":    N,
+        "K":    K,
     }
 
 
@@ -639,12 +526,23 @@ def generate_histogram(
 def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
     """Recursive preorder walk of a SymPy expression tree."""
 
+    # ── mathematical constants: pi and e (Euler's number) ────────────────────
+    if expr is sp.pi:
+        tokens.append("pi")
+        mantissas.append(0.0)
+        return
+
+    if expr is sp.E:
+        tokens.append("exp")
+        mantissas.append(0.0)
+        return
+
     # ── numbers / constants ──────────────────────────────────────────────────
     if expr.is_number or not expr.free_symbols:
         try:
             c = float(expr)
-            tokens.append(_num_placeholder(c))   # raw float string, replaced later
-            mantissas.append(c)                  # store raw value; encoding in step 6
+            tokens.append(_num_placeholder(c))
+            mantissas.append(c)
             return
         except (TypeError, ValueError):
             pass
@@ -688,9 +586,17 @@ def _collect_prefix(expr, tokens: list, mantissas: list) -> None:
             _collect_prefix(expr.exp, tokens, mantissas)
         return
 
+    # ── exp(arg) → pow exp arg  (exp is the Euler constant, a leaf token) ────
+    if isinstance(expr, sp.exp):
+        tokens.append("pow")
+        mantissas.append(0.0)
+        tokens.append("exp")
+        mantissas.append(0.0)
+        _collect_prefix(expr.args[0], tokens, mantissas)
+        return
+
     # ── named unary functions ─────────────────────────────────────────────────
     _FUNC_MAP = {
-        sp.exp:  "exp",
         sp.log:  "log",
         sp.sin:  "sin",
         sp.cos:  "cos",
@@ -722,14 +628,11 @@ def _num_placeholder(c: float) -> str:
 def infix_to_prefix(sympy_expr) -> dict:
     """Convert a SymPy infix expression to a preorder (prefix) token list.
 
-    Constants are stored as raw values in the 'raw_mantissas' field.
-    Use encode_constants() afterwards to convert to C{ce} scientific notation.
-
     Returns
     -------
     dict:
-        tokens        – list[str]   preorder operator/variable tokens
-        raw_mantissas – list[float] parallel raw constant values (0.0 for non-constants)
+        tokens        – list[str]
+        raw_mantissas – list[float] (0.0 for non-constants)
     """
     tokens: list = []
     mantissas: list = []
@@ -741,13 +644,11 @@ def infix_to_prefix(sympy_expr) -> dict:
 # Step 5 — prefix_to_infix
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Arity table for known operator tokens
 _ARITY = {
     "+":    2,
     "mul":  2,
     "pow":  2,
     "sqrt": 1,
-    "exp":  1,
     "log":  1,
     "sin":  1,
     "cos":  1,
@@ -758,19 +659,7 @@ _ARITY = {
 
 
 def prefix_to_infix(tokens: list, mantissas: Optional[list] = None) -> str:
-    """Reconstruct a human-readable infix string from a preorder token list.
-
-    Parameters
-    ----------
-    tokens    : list[str] as returned by infix_to_prefix() or encode_constants()
-    mantissas : optional list[float] — if provided, numeric placeholders
-                (NUM(...) or C{ce} tokens) are replaced with their float values.
-
-    Returns
-    -------
-    str  infix expression
-    """
-    # If mantissas are provided, resolve numeric tokens to floats first
+    """Reconstruct a human-readable infix string from a preorder token list."""
     resolved: list = []
     for i, tok in enumerate(tokens):
         if mantissas and (tok.startswith("C") or tok.startswith("NUM")):
@@ -780,12 +669,10 @@ def prefix_to_infix(tokens: list, mantissas: Optional[list] = None) -> str:
             resolved.append(tok)
 
     stack: list = []
-    # Walk in reverse for a stack-based reconstruction
     for tok in reversed(resolved):
         arity = _ARITY.get(tok, None)
 
         if arity is None:
-            # Leaf: variable, integer token, or resolved numeric
             stack.append(tok)
             continue
 
@@ -813,7 +700,7 @@ def prefix_to_infix(tokens: list, mantissas: Optional[list] = None) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 6 — encode_constants  (scientific-notation encoding per the paper)
+# Step 6 — encode_constants
 # ══════════════════════════════════════════════════════════════════════════════
 
 def encode_constant(c: float) -> tuple:
@@ -823,17 +710,6 @@ def encode_constant(c: float) -> tuple:
     Zero                      → 'C0'; mantissa = 0.0
     Other values              → 'C{ce}' where ce = floor(log10|c|) + 1
                                 mantissa cm = c / 10^ce, so |cm| ∈ [0.1, 1)
-
-    Examples
-    --------
-    encode_constant(3)       → ('3',   0.0)
-    encode_constant(0.017)   → ('C-1', 0.17)
-    encode_constant(1781.5)  → ('C4',  0.17815)
-    encode_constant(-0.05)   → ('C-1', -0.5)
-
-    Returns
-    -------
-    (token: str, mantissa: float)
     """
     c_int = int(round(c))
     if c == float(c_int) and c_int in SMALL_INTS:
@@ -844,6 +720,7 @@ def encode_constant(c: float) -> tuple:
 
     abs_c = abs(c)
     ce = int(math.floor(math.log10(abs_c))) + 1
+    ce = max(-4, min(4, ce))
     cm = c / (10.0 ** ce)
     return f"C{ce}", round(cm, 8)
 
@@ -851,32 +728,30 @@ def encode_constant(c: float) -> tuple:
 def encode_constants(tokens: list, raw_mantissas: list) -> dict:
     """Replace raw numeric placeholders in a prefix token list with C{ce} tokens.
 
-    Parameters
-    ----------
-    tokens        : list[str] from infix_to_prefix()
-    raw_mantissas : list[float] parallel raw values from infix_to_prefix()
-
     Returns
     -------
     dict:
-        tokens    – list[str]   final token sequence (C{ce} / small-int / op / 'x')
+        tokens    – list[str]   final token sequence
         mantissas – list[float] parallel mantissa values (0.0 for non-constants)
     """
     out_tokens: list = []
     out_mantissas: list = []
 
     for tok, raw in zip(tokens, raw_mantissas):
-        if tok.startswith("NUM(") or (tok not in _ARITY and tok != "x" and tok not in [str(i) for i in range(-5, 6)]):
-            # Raw numeric placeholder — encode it
+        if tok.startswith("NUM(") or (
+            tok not in _ARITY
+            and tok != "x"
+            and tok not in ("pi", "exp")
+            and tok not in [str(i) for i in range(-5, 6)]
+        ):
             tok_enc, cm = encode_constant(raw)
             out_tokens.append(tok_enc)
             out_mantissas.append(cm)
         elif tok in [str(i) for i in range(-5, 6)]:
-            # Small int token — already final
             out_tokens.append(tok)
             out_mantissas.append(0.0)
         else:
-            # Operator or variable
+            # operator, variable, or math constant (pi, e)
             out_tokens.append(tok)
             out_mantissas.append(0.0)
 
@@ -890,20 +765,18 @@ def encode_constants(tokens: list, raw_mantissas: list) -> dict:
 def encode_expression(sympy_expr) -> dict:
     """Convert a SymPy expression to a preorder token sequence with encoded constants.
 
-    Combines infix_to_prefix() + encode_constants() in one call.
-
     Returns
     -------
     dict:
-        tokens    – list[str]   final token sequence
-        mantissas – list[float] parallel mantissa values
+        tokens    – list[str]
+        mantissas – list[float]
     """
     prefix = infix_to_prefix(sympy_expr)
     return encode_constants(prefix["tokens"], prefix["raw_mantissas"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 8 — generate_dataset  (batch, Algorithm 1 + 2)
+# Step 8 — generate_dataset
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_dataset(
@@ -919,25 +792,20 @@ def generate_dataset(
 ) -> list:
     """Generate n validated (function + histogram + encoding) records.
 
+    Each record contains only what is needed for the training pipeline:
+        expr_str  – human-readable expression string
+        histogram – dict {bins, N, K}
+        encoding  – dict {tokens, mantissas}
+
     Parameters
     ----------
     n             : target number of valid records
-    max_components: max base functions per sample  (paper uses 1–3)
-    verbose       : print per-step timing for each sample
+    max_components: max base functions per sample
+    verbose       : print per-step timing
     seed          : random seed for reproducibility
     n_min/max     : range for histogram total count N
     k_min/max     : range for histogram bin count K
-
-    Returns
-    -------
-    list of dicts, each containing:
-        expr_str      – str representation of f(x)
-        latex         – LaTeX string of f(x)
-        n_components  – number of base functions combined
-        operators     – list of operators used
-        norm_const    – ∫₀¹ f_raw dx before normalisation
-        histogram     – dict {bins, edges, means, N, K}
-        encoding      – dict {tokens, mantissas}
+    allowed_factories : restrict base function types (None = all)
     """
     if seed is not None:
         random.seed(seed)
@@ -976,7 +844,7 @@ def generate_dataset(
                 )
             continue
 
-        # ── Step C: histogram ────────────────────────────────────────────────
+        # ── Step C: histogram (Algorithm 1) ─────────────────────────────────
         t2 = time.perf_counter()
         histogram = generate_histogram(
             result["numpy_fn"],
@@ -985,26 +853,21 @@ def generate_dataset(
         )
         t_hist = time.perf_counter() - t2
 
-        # ── Step D: encoding ─────────────────────────────────────────────────
+        # ── Step D: encoding + normalised expr_str ───────────────────────────
         t3 = time.perf_counter()
         encoding = (
             encode_expression(result["sympy_expr"])
             if result["sympy_expr"] is not None
             else {"tokens": [], "mantissas": []}
         )
+        expr_str = prefix_to_infix(encoding["tokens"], encoding["mantissas"])
         t_enc = time.perf_counter() - t3
 
-        # ── Assemble record ───────────────────────────────────────────────────
-        record = {
-            "expr_str":     result["expr_str"],
-            "latex":        result["latex"],
-            "n_components": result["n_components"],
-            "operators":    result["operators"],
-            "norm_const":   result["norm_const"],
-            "histogram":    histogram,
-            "encoding":     encoding,
-        }
-        dataset.append(record)
+        dataset.append({
+            "expr_str":  expr_str,
+            "histogram": histogram,
+            "encoding":  encoding,
+        })
 
         if verbose:
             idx = len(dataset)
@@ -1027,83 +890,10 @@ def generate_dataset(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Gallery display (unchanged logic, updated for new pipeline)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _format_expr(expr_str: str) -> str:
-    """Round all floats in an expression string to 3 d.p."""
-    import re
-    result = re.sub(r"\bpi\b", "3.142", expr_str)
-    result = re.sub(r"\bE\b", "2.718", result)
-    result = re.sub(
-        r"-?\d+\.\d+(?:[eE][+-]?\d+)?",
-        lambda m: f"{float(m.group()):.3f}",
-        result,
-    )
-    return result
-
-
-def display_gallery(max_components: int = 3) -> None:
-    """Generate 10 normalised functions and display them in a 2×5 grid."""
-    import matplotlib.pyplot as plt
-    import matplotlib.ticker as ticker
-    from matplotlib.widgets import Button
-
-    N_COLS, N_ROWS = 5, 2
-    N_SAMPLES = N_COLS * N_ROWS
-
-    def generate_batch():
-        batch = []
-        while len(batch) < N_SAMPLES:
-            r = generate_function(max_components=max_components)
-            if r is not None:
-                ok, _ = validate_function(r)
-                if ok:
-                    batch.append(r)
-        return batch
-
-    def draw_batch(batch):
-        print()
-        for i, (ax, s) in enumerate(zip(axes.flat, batch), start=1):
-            xs = np.linspace(1e-6, 1 - 1e-6, 600)
-            ys = s["numpy_fn"](xs)
-            ax.clear()
-            ax.plot(xs, ys, lw=1.8, color="steelblue", zorder=3)
-            ax.fill_between(xs, ys, alpha=0.18, color="steelblue", zorder=2)
-            ax.set_xlim(0, 1)
-            ax.set_ylim(bottom=0)
-            ax.set_xlabel("x", fontsize=8)
-            ax.set_ylabel("f(x)", fontsize=8)
-            ax.tick_params(labelsize=7)
-            ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
-            ax.grid(True, linestyle="--", alpha=0.4, zorder=1)
-            ax.spines[["top", "right"]].set_visible(False)
-            ops_str = ", ".join(s["operators"]) if s["operators"] else "—"
-            ax.set_title(
-                f"#{i}  m={s['n_components']}  ops=[{ops_str}]  C={s['norm_const']:.4f}",
-                fontsize=7, pad=4,
-            )
-            print(f"  {i:>2}. f(x) = {_format_expr(s['expr_str'])}")
-        fig.canvas.draw_idle()
-
-    fig, axes = plt.subplots(N_ROWS, N_COLS, figsize=(20, 7))
-    fig.suptitle("FASEROH — Generated Normalised Functions", fontsize=13, y=0.99)
-    plt.subplots_adjust(top=0.90, bottom=0.08, hspace=0.55, wspace=0.35)
-    draw_batch(generate_batch())
-
-    bax = fig.add_axes([0.40, 0.02, 0.20, 0.055])
-    btn = Button(bax, "Refresh — Generate 10 New", color="#e3f2fd", hovercolor="#90caf9")
-    btn.label.set_fontsize(10)
-    btn.on_clicked(lambda _: draw_batch(generate_batch()))
-    plt.show()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    # ── POC demo: generate 10 samples using only POC-allowed factories ────
     POC_FACTORIES = ["sine_bump", "cosine_arch", "exponential", "polynomial"]
     print(f"POC demo — generating 10 samples with factories: {POC_FACTORIES}\n")
     samples = generate_dataset(
@@ -1121,6 +911,8 @@ if __name__ == "__main__":
     for i, rec in enumerate(samples, 1):
         toks = rec["encoding"]["tokens"]
         mant = rec["encoding"]["mantissas"]
-        print(f"  {i:>2}. expr = {rec['expr_str']}")
-        print(f"      tokens    = {toks}")
-        print(f"      mantissas = {[round(m, 4) for m in mant]}\n")
+        hist = rec["histogram"]
+        print(f"  {i:>2}. expr     = {rec['expr_str']}")
+        print(f"      tokens   = {toks}")
+        print(f"      mantissas= {[round(m, 4) for m in mant]}")
+        print(f"      N={hist['N']}, K={hist['K']}, bins[:5]={hist['bins'][:5].tolist()}\n")
