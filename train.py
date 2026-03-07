@@ -123,7 +123,7 @@ def train_one_epoch(
 def evaluate(
     model: nn.Module, loader: DataLoader, config,
 ) -> tuple[float, float]:
-    """Compute average validation loss and sentence-level accuracy.
+    """Compute average validation loss, sentence-level accuracy, and token accuracy.
 
     Parameters
     ----------
@@ -133,14 +133,16 @@ def evaluate(
 
     Returns
     -------
-    tuple[float, float]  (average validation loss, sentence accuracy)
+    tuple[float, float, float]  (average validation loss, sentence accuracy, token accuracy)
     """
     model.eval()
     pad_id = token_to_id(config.pad_token)
     ce_loss_fn = nn.CrossEntropyLoss(ignore_index=pad_id)
     total_loss = 0.0
     n_batches = 0
-    n_correct = 0
+    n_sent_correct = 0
+    n_tok_correct = 0
+    n_tok_total = 0
     n_total = 0
 
     for batch in loader:
@@ -157,16 +159,22 @@ def evaluate(
         total_loss += loss.item()
         n_batches += 1
 
-        # Sentence accuracy: greedy predictions vs true tokens (excluding pad)
         pred_ids = logits[:, :-1].argmax(dim=-1)  # (B, T-1)
         true_ids = tgt[:, 1:]                       # (B, T-1)
         non_pad = true_ids != pad_id
+
+        # Sentence accuracy: all non-pad tokens must match
         correct = ((pred_ids == true_ids) | ~non_pad).all(dim=-1)
-        n_correct += correct.sum().item()
+        n_sent_correct += correct.sum().item()
         n_total += tgt.size(0)
 
-    sentence_acc = n_correct / n_total if n_total > 0 else 0.0
-    return total_loss / max(n_batches, 1), sentence_acc
+        # Token accuracy: fraction of non-pad tokens predicted correctly
+        n_tok_correct += ((pred_ids == true_ids) & non_pad).sum().item()
+        n_tok_total += non_pad.sum().item()
+
+    sentence_acc = n_sent_correct / n_total if n_total > 0 else 0.0
+    token_acc = n_tok_correct / n_tok_total if n_tok_total > 0 else 0.0
+    return total_loss / max(n_batches, 1), sentence_acc, token_acc
 
 
 def _print_sample(

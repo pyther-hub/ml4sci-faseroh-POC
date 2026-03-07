@@ -73,13 +73,8 @@ class FASeROHConfig:
     log_every_n_steps: int = 50
 
     # Inference
-    top_k: int = 10
+    top_k: int = 5
     n_inference_samples: int = 50
-
-    # Evaluation — set which metrics to compute.
-    # Available: "r2", "sentence_acc", "prefix_validity", "fn_validity", "gof"
-    # Remove "gof" if goodness-of-fit is causing crashes / wrong outputs.
-    eval_metrics: tuple = ("r2", "sentence_acc", "prefix_validity", "fn_validity", "gof")
 
 
 config = FASeROHConfig()
@@ -199,7 +194,7 @@ for epoch in range(config.n_epochs):
     print(f"{'='*60}")
 
     train_loss = train_one_epoch(model, train_loader, optimizer, config, epoch)
-    val_loss, val_sent_acc = evaluate(model, val_loader, config)
+    val_loss, val_sent_acc, val_tok_acc = evaluate(model, val_loader, config)
 
     saved = ""
     if val_loss < best_val_loss:
@@ -209,15 +204,10 @@ for epoch in range(config.n_epochs):
 
     print(
         f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-        f"val_sent_acc={val_sent_acc:.4f}  best_val={best_val_loss:.4f}{saved}"
+        f"val_sent_acc={val_sent_acc:.4f}  val_tok_acc={val_tok_acc:.4f}  "
+        f"best_val={best_val_loss:.4f}{saved}"
     )
     # _print_sample(model, val_loader, config)
-
-    if (epoch + 1) % config.evaluate_after == 0:
-        print(f"\n[Epoch {epoch + 1}] Running evaluation ...")
-        state = torch.load(config.checkpoint_path, weights_only=True)
-        model.load_state_dict(state)
-        evaluate_predictions(model, test_loader, config, numpy_fns, test_recs)
 
 print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
 
