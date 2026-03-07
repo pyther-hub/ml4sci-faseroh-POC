@@ -72,7 +72,7 @@ def _eval_expr_on_grid(
     try:
         # Safe eval with numpy
         safe_ns = {
-            "x": x_grid, "exp": np.exp, "sin": np.sin, "cos": np.cos,
+            "x": x_grid, "exp": np.e, "sin": np.sin, "cos": np.cos,
             "sqrt": np.sqrt, "log": np.log, "abs": np.abs, "pi": np.pi,
             "__builtins__": {},
         }
