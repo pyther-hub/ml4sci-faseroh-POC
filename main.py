@@ -3,13 +3,14 @@
 Sections
 --------
 1. Imports
-2. Configuration
+2. Configuration (with interactive prompt)
 3. Helper functions
 4. Data loading
 5. Model setup
-6. Training loop
+6. Training loop (with history tracking)
 7. Final evaluation
 8. Custom function inference
+9. Training curves (saved to training_curves.png)
 """
 
 from __future__ import annotations
@@ -18,11 +19,14 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 import numpy as np
 import torch
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from scipy import integrate as sci_integrate
 from torch.utils.data import DataLoader
 from dataset import FASeROHDataset, collate_fn          # noqa: E402
@@ -92,8 +96,56 @@ class FASeROHConfig:
 
 config = FASeROHConfig()
 
+# ── Interactive configuration ────────────────────────────────────────────────
+# Allow user to override any config field before training starts.
+
+_field_names = {f.name for f in fields(FASeROHConfig)}
+
 print("\n" + "=" * 55)
-print("  FASEROH POC — Configuration")
+print("  FASEROH POC — Current Configuration")
+print("=" * 55)
+for k, v in vars(config).items():
+    print(f"  {k:30s} = {v}")
+print("=" * 55)
+
+print("\nYou can override config values before training starts.")
+print("Enter changes as `field_name=value` (e.g. `n_epochs=10`, `lr=3e-4`).")
+print("Type 'done' or press Enter on an empty line to start training.\n")
+
+while True:
+    try:
+        line = input("config> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        break
+    if not line or line.lower() == "done":
+        break
+    if "=" not in line:
+        print(f"  Invalid format. Use field_name=value.")
+        continue
+    key, _, val_str = line.partition("=")
+    key = key.strip()
+    val_str = val_str.strip()
+    if key not in _field_names:
+        print(f"  Unknown field '{key}'. Available: {sorted(_field_names)}")
+        continue
+    current = getattr(config, key)
+    try:
+        if isinstance(current, bool):
+            parsed = val_str.lower() in ("true", "1", "yes")
+        elif isinstance(current, int):
+            parsed = int(val_str)
+        elif isinstance(current, float):
+            parsed = float(val_str)
+        else:
+            parsed = val_str
+        setattr(config, key, parsed)
+        print(f"  {key} = {parsed}")
+    except ValueError:
+        print(f"  Could not parse '{val_str}' as {type(current).__name__}")
+
+print("\n" + "=" * 55)
+print("  Final Configuration")
 print("=" * 55)
 for k, v in vars(config).items():
     print(f"  {k:30s} = {v}")
@@ -212,6 +264,17 @@ best_val_loss = float("inf")
 ckpt_dir = Path(config.checkpoint_path).parent
 ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+# History dict to store all metrics per epoch
+history = {
+    "epoch": [],
+    "train_loss": [],
+    "train_sent_acc": [],
+    "val_loss": [],
+    "val_sent_acc": [],
+    "val_tok_acc": [],
+    "lr": [],
+}
+
 for epoch in range(config.n_epochs):
     print(f"\n{'='*60}")
     print(f"Epoch {epoch + 1}/{config.n_epochs}")
@@ -237,7 +300,15 @@ for epoch in range(config.n_epochs):
         f"lr={lr_now:.2e}{saved}"
     )
     scheduler.step()
-    # _print_sample(model, val_loader, config)
+
+    # Store metrics for this epoch
+    history["epoch"].append(epoch + 1)
+    history["train_loss"].append(train_loss)
+    history["train_sent_acc"].append(train_sent_acc)
+    history["val_loss"].append(val_loss)
+    history["val_sent_acc"].append(val_sent_acc)
+    history["val_tok_acc"].append(val_tok_acc)
+    history["lr"].append(lr_now)
 
 print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
 
@@ -334,3 +405,57 @@ for i, fn in enumerate(functions):
             print(f"  GoF χ²/ndf : N/A")
 
 print(f"\n  Invalid: {n_invalid_custom}/{len(functions)} functions had no valid prediction")
+
+
+# ── 9. Training curves ──────────────────────────────────────────────────────
+
+PLOT_PATH = "training_curves.png"
+
+epochs = history["epoch"]
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig.suptitle("FASEROH Training Curves", fontsize=16, fontweight="bold")
+
+# (a) Loss
+ax = axes[0, 0]
+ax.plot(epochs, history["train_loss"], label="Train Loss", marker="o", markersize=3)
+ax.plot(epochs, history["val_loss"], label="Val Loss", marker="s", markersize=3)
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Loss")
+ax.set_title("Loss")
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+# (b) Sentence accuracy
+ax = axes[0, 1]
+ax.plot(epochs, history["train_sent_acc"], label="Train Sent Acc", marker="o", markersize=3)
+ax.plot(epochs, history["val_sent_acc"], label="Val Sent Acc", marker="s", markersize=3)
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Accuracy")
+ax.set_title("Sentence Accuracy")
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+# (c) Val token accuracy
+ax = axes[1, 0]
+ax.plot(epochs, history["val_tok_acc"], label="Val Token Acc", color="tab:green", marker="^", markersize=3)
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Accuracy")
+ax.set_title("Validation Token Accuracy")
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+# (d) Learning rate
+ax = axes[1, 1]
+ax.plot(epochs, history["lr"], label="Learning Rate", color="tab:red", marker="d", markersize=3)
+ax.set_xlabel("Epoch")
+ax.set_ylabel("LR")
+ax.set_title("Learning Rate Schedule")
+ax.set_yscale("log")
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+fig.savefig(PLOT_PATH, dpi=150, bbox_inches="tight")
+plt.close(fig)
+print(f"\nTraining curves saved to {PLOT_PATH}")
