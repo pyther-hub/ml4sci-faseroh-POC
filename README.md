@@ -26,7 +26,7 @@ FASEROH tackles this problem by training a neural network to directly map an emp
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/pyther-hub/ml4sci-faseroh-POC.git
 cd faseroh-poc
 
 # Create and activate a virtual environment
