@@ -94,9 +94,9 @@ The weight λ warms up linearly from 0 over the first few epochs, letting the mo
 
 ## Experiment & Results
 
-### Baseline Training (10k dataset, 100 epochs)
+### Baseline Training (100k dataset, 100 epochs)
 
-The model was trained on `dataset_demo_10k.json` with the default configuration. The training curves below show convergence across key metrics:
+The model was trained on `dataset_demo_100k.json` with the default configuration. The training curves below show convergence across key metrics:
 
 ![FASEROH Training Curves](faseroh-poc-training-baseline.png)
 
@@ -121,6 +121,7 @@ The model is evaluated on multiple complementary metrics:
 ## Notebooks
 
 ### `faseroh-dataset-generation-poc.ipynb`
+https://www.kaggle.com/code/tensorpanda231/faseroh-dataset-generation-poc
 
 This notebook demonstrates the **dataset generation pipeline** — how synthetic (histogram, expression) training pairs are created. It walks through:
 
@@ -130,6 +131,8 @@ This notebook demonstrates the **dataset generation pipeline** — how synthetic
 - Conversion of expressions to prefix notation and the constant-encoding scheme
 
 ### `faseroh-model-training-poc.ipynb`
+https://www.kaggle.com/code/tensorpanda231/faseroh-model-training-poc
+
 
 This notebook provides an **interactive training and inference walkthrough**. It covers:
 

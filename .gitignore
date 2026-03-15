@@ -3,4 +3,3 @@ data/*
 logs/*
 .venv/
 .claude/
-CLAUDE.md
